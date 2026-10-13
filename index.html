@@ -244,6 +244,16 @@ section.block { margin-top: 26px; }
 section.block h2 { font-size: 1.15rem; margin-bottom: 10px; }
 .seed:not(:empty) { margin-bottom: 14px; }
 .seed .btn { width: 100%; }
+.seg { display: flex; background: var(--surface-2); border-radius: 999px; padding: 4px; margin-bottom: 12px; }
+.seg button { flex: 1; border: 0; background: none; border-radius: 999px; padding: 8px 0; font-weight: 600; color: var(--muted); }
+.seg button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.name-form input {
+  width: 100%; max-width: 320px; padding: 12px 16px; border-radius: 999px; font-size: 16px; text-align: center;
+  border: 1px solid var(--line); background: var(--surface);
+}
+.name-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+#me:empty { display: none; }
+#me .note { margin: 0 2px 10px; }
 .backup { display: flex; gap: 8px; flex-wrap: wrap; }
 .note { font-size: .82rem; color: var(--muted); margin: 8px 2px 0; }
 
@@ -301,6 +311,8 @@ section.block h2 { font-size: 1.15rem; margin-bottom: 10px; }
       <h2 id="cat-h">Seu catálogo</h2>
       <ul class="song-list" id="catalog"></ul>
     </section>
+
+    <section class="block" id="me"></section>
 
     <section class="block" aria-labelledby="bk-h">
       <h2 id="bk-h">Backup</h2>

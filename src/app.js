@@ -4,6 +4,7 @@ import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd
 import { pickDuel } from './matchmaker.js';
 import { createPlayer } from './player.js';
 import { search, rateLimited, loadSeed } from './catalog.js';
+import { syncEnabled, pushRows, pullRows, songToRow, rowToSong, voteToRow, rowToVote } from './sync.js';
 
 const STORAGE_KEY = 'duelo:v1';
 const $ = (sel) => document.querySelector(sel);
@@ -19,17 +20,23 @@ function load() {
         songs: Array.isArray(d.songs) ? d.songs : [],
         votes: Array.isArray(d.votes) ? d.votes : [],
         pending: d.pending || null,
+        me: typeof d.me === 'string' ? d.me : null,
+        seq: d.seq || { votes: 0, songs: 0 },
       };
     }
   } catch (e) {
     console.warn('Falha ao ler dados', e);
   }
-  return { songs: [], votes: [], pending: null };
+  return { songs: [], votes: [], pending: null, me: null, seq: { votes: 0, songs: 0 } };
 }
 
 let data = load();
-let state = replay(data.songs, data.votes);
+// Votos sem autor são deste aparelho (anteriores à sincronização ou de backup antigo).
+const isMine = (v) => !v.voter || (data.me != null && v.voter.toLowerCase() === data.me.toLowerCase());
+let state; // só os meus votos: duelos e ranking pessoal
+let stateAll; // votos de todo mundo: ranking geral
 const voteIds = new Set(data.votes.map((v) => v.id));
+rebuild();
 
 function save() {
   try {
@@ -40,7 +47,8 @@ function save() {
 }
 
 function rebuild() {
-  state = replay(data.songs, data.votes);
+  state = replay(data.songs, data.votes.filter(isMine));
+  stateAll = syncEnabled ? replay(data.songs, data.votes) : state;
 }
 
 try {
@@ -144,7 +152,10 @@ function showTab(tab) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + tab));
   if (tab === 'duel') renderDuel();
   if (tab === 'rank') renderRanking();
-  if (tab === 'songs') renderCatalog();
+  if (tab === 'songs') {
+    renderCatalog();
+    renderMe();
+  }
   window.scrollTo(0, 0);
 }
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -213,6 +224,24 @@ function renderDuel() {
   body.className = 'arena';
   body.replaceChildren();
 
+  if (syncEnabled && !data.me) {
+    const input = el('input', { type: 'text', maxlength: '40', autocomplete: 'given-name', placeholder: 'Seu nome', 'aria-label': 'Seu nome' });
+    const form = el(
+      'form',
+      { class: 'empty name-form' },
+      el('h2', { text: 'Como você se chama?' }),
+      el('p', { text: 'Seu nome separa seus votos no ranking geral. Use o mesmo nome se abrir em outro aparelho.' }),
+      input,
+      el('button', { class: 'btn', type: 'submit', text: 'Começar' })
+    );
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      setName(input.value);
+    });
+    body.append(form);
+    return;
+  }
+
   if (activeSongs().length < 2) {
     const n = activeSongs().length;
     body.append(
@@ -248,14 +277,22 @@ function vote(r) {
   player.pause();
 
   const v = { id: p.id, a: p.a, b: p.b, r, t: Date.now() };
+  if (syncEnabled) {
+    v.voter = data.me;
+    v._p = 1;
+  }
   if (!voteIds.has(v.id)) {
     voteIds.add(v.id);
     data.votes.push(v);
-    if (!state.lastVote || compareVotes(state.lastVote, v) < 0) applyVote(state, v);
-    else rebuild();
+    const inc = (st) => !st.lastVote || compareVotes(st.lastVote, v) < 0;
+    if (inc(state) && (stateAll === state || inc(stateAll))) {
+      applyVote(state, v);
+      if (stateAll !== state) applyVote(stateAll, v);
+    } else rebuild();
   }
   data.pending = null;
   save();
+  scheduleSync();
 
   const body = $('#duel-body');
   body.classList.remove('entering');
@@ -286,14 +323,40 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- ranking ----------
 
+let rankMode = syncEnabled ? 'all' : 'me';
+
 function renderRanking() {
   const body = $('#rank-body');
   body.replaceChildren();
   const now = Date.now();
-  const rows = ranking(state, now);
+  const st = rankMode === 'all' ? stateAll : state;
+  const rows = ranking(st, now);
   $('#rank-count').textContent = rows.length ? `${rows.length} ${rows.length === 1 ? 'música' : 'músicas'}` : '';
 
-  if (state.history.count === 0) {
+  if (syncEnabled) {
+    const seg = el('div', { class: 'seg', role: 'tablist', 'aria-label': 'Tipo de ranking' });
+    for (const [mode, label] of [['all', 'Geral'], ['me', 'Meu']]) {
+      seg.append(
+        el('button', {
+          type: 'button',
+          role: 'tab',
+          'aria-selected': String(rankMode === mode),
+          text: label,
+          onclick: () => {
+            rankMode = mode;
+            renderRanking();
+          },
+        })
+      );
+    }
+    body.append(seg);
+    if (rankMode === 'all') {
+      const voters = new Set(data.votes.map((v) => (v.voter || data.me || '').toLowerCase()).filter(Boolean));
+      body.append(el('p', { class: 'legend', text: `${voters.size} ${voters.size === 1 ? 'pessoa' : 'pessoas'} · ${st.history.count} votos` }));
+    }
+  }
+
+  if (st.history.count === 0) {
     const enough = rows.length >= 2;
     body.append(
       el(
@@ -370,10 +433,11 @@ function addSong(song) {
     if (!existing.art && song.art) existing.art = song.art;
     toast('Música reativada.');
   } else {
-    data.songs.push({ ...song, addedAt: Date.now(), archived: false });
+    data.songs.push({ ...song, addedAt: Date.now(), archived: false, ...(syncEnabled ? { _p: 1 } : {}) });
     toast('Adicionada ao catálogo.');
   }
   save();
+  scheduleSync();
   rebuild();
   renderResults();
   renderCatalog();
@@ -499,9 +563,10 @@ function addSeed() {
   for (const song of missing) {
     const existing = data.songs.find((s) => s.id === song.id);
     if (existing) existing.archived = false;
-    else data.songs.push({ ...song, addedAt: now, archived: false });
+    else data.songs.push({ ...song, addedAt: now, archived: false, ...(syncEnabled ? { _p: 1 } : {}) });
   }
   save();
+  scheduleSync();
   rebuild();
   toast(`${missing.length} músicas adicionadas.`);
   renderSeed();
@@ -528,6 +593,144 @@ loadSeed().then((pack) => {
   renderSeed();
   if (currentTab === 'duel' && activeSongs().length < 2) renderDuel();
 });
+
+// ---------- sincronização ----------
+
+function setName(raw) {
+  const name = String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  if (!name) return toast('Digite um nome.');
+  data.me = name;
+  save();
+  rebuild();
+  renderMe();
+  scheduleSync();
+  renderDuel();
+}
+
+let syncing = false;
+let syncAgain = false;
+let syncState = 'idle'; // idle | ok | offline
+let syncTimer = null;
+
+function scheduleSync(delay = 800) {
+  if (!syncEnabled) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncNow, delay);
+}
+
+async function syncNow() {
+  if (!syncEnabled || !data.me) return;
+  if (syncing) {
+    syncAgain = true;
+    return;
+  }
+  syncing = true;
+  try {
+    // votos antigos sem autor passam a ser meus
+    for (const v of data.votes) {
+      if (!v.voter) {
+        v.voter = data.me;
+        v._p = 1;
+      }
+    }
+    const songsOut = data.songs.filter((x) => x._p);
+    if (songsOut.length) {
+      await pushRows('songs', songsOut.map((x) => songToRow(x, data.me)));
+      songsOut.forEach((x) => delete x._p);
+      save();
+    }
+    const votesOut = data.votes.filter((v) => v._p);
+    if (votesOut.length) {
+      await pushRows('votes', votesOut.map(voteToRow));
+      votesOut.forEach((v) => delete v._p);
+      save();
+    }
+
+    let changed = false;
+    const songRows = await pullRows('songs', 'seq,id,title,artist,album,art,preview,link,itunes_id,added_at', data.seq.songs);
+    const known = new Set(data.songs.map((x) => x.id));
+    for (const r of songRows) {
+      data.seq.songs = Math.max(data.seq.songs, r.seq);
+      if (!known.has(r.id)) {
+        known.add(r.id);
+        data.songs.push(rowToSong(r));
+        changed = true;
+      }
+    }
+    const voteRows = await pullRows('votes', 'seq,id,a,b,r,t,voter', data.seq.votes);
+    for (const r of voteRows) {
+      data.seq.votes = Math.max(data.seq.votes, r.seq);
+      if (!voteIds.has(r.id)) {
+        voteIds.add(r.id);
+        data.votes.push(rowToVote(r));
+        changed = true;
+      }
+    }
+    save();
+    syncState = 'ok';
+    if (changed) {
+      rebuild();
+      if (currentTab === 'rank') renderRanking();
+      if (currentTab === 'songs') {
+        renderCatalog();
+        renderSeed();
+      }
+      if (currentTab === 'duel' && $('#duel-body .empty')) renderDuel();
+      else $('#duel-count').textContent = state.history.count ? `${state.history.count} ${state.history.count === 1 ? 'duelo' : 'duelos'}` : '';
+    }
+  } catch (e) {
+    console.warn('Falha ao sincronizar', e);
+    syncState = 'offline';
+  } finally {
+    syncing = false;
+    renderMe();
+    if (syncAgain) {
+      syncAgain = false;
+      scheduleSync(0);
+    }
+  }
+}
+
+function renderMe() {
+  const box = $('#me');
+  if (!box) return;
+  box.replaceChildren();
+  if (!syncEnabled) return;
+  const pending = data.votes.filter((v) => v._p).length;
+  const status =
+    syncState === 'offline'
+      ? `Sem conexão com o ranking geral${pending ? ` · ${pending} votos aguardando envio` : ''}`
+      : syncState === 'ok'
+        ? 'Sincronizado com o ranking geral'
+        : 'Conectando ao ranking geral…';
+  box.append(
+    el('h2', { text: 'Você' }),
+    el('p', { class: 'note', text: data.me ? `Votando como ${data.me}. ${status}.` : 'Escolha seu nome na aba Duelo.' })
+  );
+  if (data.me) {
+    box.append(
+      el('button', {
+        class: 'btn ghost small',
+        type: 'button',
+        text: 'Trocar nome',
+        onclick: () => {
+          const name = prompt('Novo nome (seus votos antigos continuam com o nome anterior):', data.me);
+          if (name != null && name.trim()) setName(name);
+        },
+      })
+    );
+  }
+}
+
+if (syncEnabled) {
+  setInterval(() => {
+    if (!document.hidden) syncNow();
+  }, 20000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) scheduleSync(0);
+  });
+  window.addEventListener('online', () => scheduleSync(0));
+}
 
 // ---------- backup ----------
 
@@ -569,3 +772,5 @@ $('#import-file').addEventListener('change', async (e) => {
 // ---------- início ----------
 
 showTab('duel');
+renderMe();
+scheduleSync(0);
