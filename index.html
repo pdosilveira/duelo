@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Duelo de Faixas</title>
+<meta name="description" content="Descubra suas músicas favoritas por comparações em pares.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Duelos">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#F5F1F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1C1424" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #F5F1F7;
+  --surface: #FFFFFF;
+  --surface-2: #EDE6F1;
+  --text: #231A2B;
+  --muted: #6E5F7A;
+  --accent: #B5720C;
+  --on-accent: #FFFFFF;
+  --accent-soft: rgba(181, 114, 12, .12);
+  --bar: #8C7BC4;
+  --bar-soft: rgba(140, 123, 196, .28);
+  --line: rgba(35, 26, 43, .09);
+  --shadow: 0 1px 2px rgba(35, 26, 43, .06), 0 8px 24px rgba(35, 26, 43, .08);
+  --tabbar: 64px;
+  --font-title: "Bricolage Grotesque", ui-rounded, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-text: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1C1424;
+    --surface: #291E33;
+    --surface-2: #33263F;
+    --text: #F3EDF7;
+    --muted: #B3A6BF;
+    --accent: #F2B544;
+    --on-accent: #1C1424;
+    --accent-soft: rgba(242, 181, 68, .14);
+    --bar: #A99BD6;
+    --bar-soft: rgba(169, 155, 214, .28);
+    --line: rgba(243, 237, 247, .08);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .25);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-text);
+  font-size: 16px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+img { display: block; }
+h1, h2, h3 { font-family: var(--font-title); font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.muted { color: var(--muted); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- estrutura ---------- */
+.view {
+  display: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: calc(env(safe-area-inset-top) + 16px) calc(env(safe-area-inset-right) + 16px)
+           calc(env(safe-area-inset-bottom) + var(--tabbar) + 16px) calc(env(safe-area-inset-left) + 16px);
+  max-width: 980px;
+  margin: 0 auto;
+}
+.view.active { display: block; }
+.view-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.view-head h1 { font-size: 1.6rem; }
+.view-head .sub { font-size: .9rem; color: var(--muted); }
+
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  display: flex; justify-content: center;
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  -webkit-backdrop-filter: saturate(1.4) blur(18px);
+  backdrop-filter: saturate(1.4) blur(18px);
+  border-top: 1px solid var(--line);
+}
+.tabbar .tabs { display: flex; width: 100%; max-width: 520px; height: var(--tabbar); }
+.tab {
+  flex: 1; border: 0; background: none; padding: 8px 0 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--muted); font-size: .72rem; font-weight: 600; letter-spacing: .02em;
+}
+.tab svg { width: 24px; height: 24px; }
+.tab[aria-selected="true"] { color: var(--accent); }
+
+.btn {
+  border: 0; border-radius: 999px; padding: 10px 18px; font-weight: 600;
+  background: var(--accent); color: var(--on-accent);
+}
+.btn.ghost { background: var(--surface-2); color: var(--text); }
+.btn.small { padding: 7px 14px; font-size: .88rem; }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn:focus-visible, .tab:focus-visible, .card:focus-visible, .play:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.empty {
+  text-align: center; padding: 48px 20px; margin-top: 8vh;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.empty h2 { font-size: 1.35rem; }
+.empty p { margin: 0; color: var(--muted); max-width: 30ch; }
+
+.credit { font-size: .74rem; color: var(--muted); text-align: center; margin: 14px 0 0; opacity: .85; }
+
+/* ---------- duelo ---------- */
+#view-duel.active { display: flex; flex-direction: column; }
+.arena {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: opacity .18s ease, transform .18s ease;
+}
+.arena.leaving { opacity: 0; transform: translateY(6px); }
+.arena.entering { animation: enter .26s ease both; }
+@keyframes enter { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+.card {
+  position: relative; overflow: hidden;
+  flex: 1 1 0; min-height: 150px; max-height: 300px;
+  display: flex; align-items: stretch; gap: 14px;
+  padding: 12px; border-radius: 22px;
+  background: var(--surface); box-shadow: var(--shadow);
+  border: 1px solid var(--line);
+  user-select: none; -webkit-user-select: none;
+  transition: transform .2s ease, opacity .2s ease, box-shadow .2s ease;
+  outline: none;
+}
+.card .bg {
+  position: absolute; inset: -40px; background-size: cover; background-position: center;
+  filter: blur(40px) saturate(1.3); opacity: .22; pointer-events: none;
+}
+.card .cover {
+  position: relative; flex: none;
+  height: 100%; aspect-ratio: 1 / 1; max-width: 48%;
+  border-radius: 14px; background: var(--surface-2) center / cover no-repeat;
+}
+.card .info { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+.card .title {
+  font-family: var(--font-title); font-weight: 700; font-size: 1.22rem; line-height: 1.15;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card .artist { color: var(--muted); font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card .meta { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.badge {
+  font-size: .76rem; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); white-space: nowrap;
+}
+.badge.new { background: var(--accent-soft); color: var(--accent); }
+.play {
+  flex: none; width: 52px; height: 52px; border-radius: 50%; border: 0;
+  display: grid; place-items: center;
+  background: var(--accent); color: var(--on-accent);
+  box-shadow: 0 4px 14px rgba(0,0,0,.18);
+}
+.play svg { width: 22px; height: 22px; }
+.play.small { width: 40px; height: 40px; box-shadow: none; }
+.play.small svg { width: 18px; height: 18px; }
+.play.loading svg { animation: pulse 1s ease-in-out infinite; }
+.play.error { background: var(--surface-2); color: var(--muted); }
+.play:disabled { opacity: .4; cursor: default; }
+@keyframes pulse { 50% { opacity: .35; } }
+.card.chosen { transform: scale(1.02); box-shadow: 0 0 0 3px var(--accent), var(--shadow); }
+.card.dimmed { opacity: .38; transform: scale(.97); }
+.card.tied { box-shadow: 0 0 0 3px var(--bar), var(--shadow); }
+@media (hover: hover) { .card:hover { box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow); } }
+
+.tie-row { display: flex; justify-content: center; }
+.tie {
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  border-radius: 999px; padding: 9px 26px; font-weight: 600; box-shadow: var(--shadow);
+}
+.tie.chosen { background: var(--bar); color: #fff; }
+.keys { display: none; text-align: center; font-size: .78rem; color: var(--muted); margin-top: 12px; }
+kbd { font-family: inherit; font-size: .74rem; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); }
+
+@media (min-width: 760px) {
+  .arena { flex-direction: row; align-items: center; justify-content: center; gap: 20px; }
+  .card {
+    flex: 1 1 0; max-width: 340px; max-height: none; min-height: 0;
+    flex-direction: column; padding: 14px;
+  }
+  .card .cover { width: 100%; height: auto; max-width: none; }
+  .card .info { padding: 2px 4px 2px; min-height: 140px; }
+  .tie-row { flex: none; }
+  .keys { display: block; }
+}
+
+/* ---------- ranking ---------- */
+.rank-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rank-row {
+  display: grid; grid-template-columns: 30px 48px 1fr; gap: 12px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px;
+}
+.rank-pos { font-family: var(--font-title); font-weight: 700; font-size: 1.1rem; text-align: center; }
+.rank-pos.uncertain { color: var(--muted); font-weight: 500; }
+.thumb { width: 48px; height: 48px; border-radius: 10px; background: var(--surface-2) center / cover no-repeat; }
+.rank-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.line1 { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.line2 { font-size: .86rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.interval { position: relative; height: 8px; border-radius: 4px; background: var(--surface-2); margin: 5px 0 2px; }
+.interval .range { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--bar-soft); border: 1px solid var(--bar); }
+.interval .mark { position: absolute; top: -3px; width: 3px; height: 14px; border-radius: 2px; background: var(--bar); transform: translateX(-50%); }
+.rank-foot { display: flex; justify-content: space-between; gap: 8px; font-size: .78rem; color: var(--muted); flex-wrap: wrap; }
+.conf { font-weight: 600; }
+.conf.firm { color: var(--accent); }
+.legend { font-size: .8rem; color: var(--muted); margin: -4px 0 12px; }
+
+/* ---------- músicas ---------- */
+.search { display: flex; gap: 8px; margin-bottom: 10px; }
+.search input {
+  flex: 1; min-width: 0; padding: 11px 16px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); font-size: 16px;
+}
+.search input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status { font-size: .88rem; color: var(--muted); min-height: 1.3em; margin: 4px 2px 8px; }
+.song-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.song-row {
+  display: grid; grid-template-columns: 48px 1fr auto; gap: 12px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 8px 10px;
+}
+.song-row .actions { display: flex; align-items: center; gap: 8px; }
+.in-cat { font-size: .82rem; font-weight: 600; color: var(--muted); padding: 0 6px; white-space: nowrap; }
+section.block { margin-top: 26px; }
+section.block h2 { font-size: 1.15rem; margin-bottom: 10px; }
+.backup { display: flex; gap: 8px; flex-wrap: wrap; }
+.note { font-size: .82rem; color: var(--muted); margin: 8px 2px 0; }
+
+/* ---------- toast ---------- */
+.toast {
+  position: fixed; left: 50%; z-index: 20;
+  bottom: calc(env(safe-area-inset-bottom) + var(--tabbar) + 14px);
+  transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px;
+  font-size: .9rem; font-weight: 500; max-width: calc(100vw - 32px);
+  transition: opacity .2s ease, transform .2s ease;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<main>
+  <section id="view-duel" class="view" aria-labelledby="duel-h">
+    <div class="view-head">
+      <h1 id="duel-h">Qual você prefere?</h1>
+      <span class="sub" id="duel-count"></span>
+    </div>
+    <div id="duel-body" class="arena"></div>
+    <p class="keys"><kbd>←</kbd> esquerda · <kbd>↓</kbd> empate · <kbd>→</kbd> direita</p>
+    <p class="credit">Prévias e capas fornecidas pela Apple</p>
+  </section>
+
+  <section id="view-rank" class="view" aria-labelledby="rank-h">
+    <div class="view-head">
+      <h1 id="rank-h">Ranking</h1>
+      <span class="sub" id="rank-count"></span>
+    </div>
+    <div id="rank-body"></div>
+  </section>
+
+  <section id="view-songs" class="view" aria-labelledby="songs-h">
+    <div class="view-head">
+      <h1 id="songs-h">Músicas</h1>
+    </div>
+    <form class="search" id="search-form" role="search">
+      <label class="sr" for="search-input">Buscar música ou artista</label>
+      <input id="search-input" type="search" enterkeyhint="search" autocomplete="off" placeholder="Música ou artista">
+      <button class="btn" type="submit">Buscar</button>
+    </form>
+    <div class="status" id="search-status" aria-live="polite"></div>
+    <ul class="song-list" id="results"></ul>
+    <p class="credit">Prévias e capas fornecidas pela Apple</p>
+
+    <section class="block" aria-labelledby="cat-h">
+      <h2 id="cat-h">Seu catálogo</h2>
+      <ul class="song-list" id="catalog"></ul>
+    </section>
+
+    <section class="block" aria-labelledby="bk-h">
+      <h2 id="bk-h">Backup</h2>
+      <div class="backup">
+        <button class="btn ghost" id="export-btn" type="button">Exportar backup</button>
+        <button class="btn ghost" id="import-btn" type="button">Importar backup</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+      </div>
+      <p class="note">Seus dados ficam só neste aparelho. Exporte de vez em quando para não perder nada; importar mescla com o que já existe.</p>
+    </section>
+  </section>
+</main>
+
+<nav class="tabbar" aria-label="Seções">
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="duel" aria-selected="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="7.5" height="14" rx="2"/><rect x="13.5" y="5" width="7.5" height="14" rx="2"/></svg>
+      Duelo
+    </button>
+    <button class="tab" role="tab" data-tab="rank" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>
+      Ranking
+    </button>
+    <button class="tab" role="tab" data-tab="songs" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+      Músicas
+    </button>
+  </div>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "duelo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Duelo de Faixas: ranking pessoal de músicas por comparações em pares (Glicko-2).",
+  "scripts": {
+    "test": "node --test test/glicko2.test.js test/engine.test.js test/matchmaker.test.js",
+    "simulate": "node test/simulate.js"
+  }
+}
