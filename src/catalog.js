@@ -66,7 +66,19 @@ export async function search(term) {
   if (!q) return [];
   if (rateLimited()) throw new Error('rate');
   calls.push(Date.now());
-  const data = await jsonp(ENDPOINT + encodeURIComponent(q));
+  const url = ENDPOINT + encodeURIComponent(q);
+  let data;
+  try {
+    // Tenta fetch direto (se a Apple liberar CORS); senão cai no JSONP.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error('http ' + res.status);
+    data = await res.json();
+  } catch {
+    data = await jsonp(url);
+  }
   const seen = new Set();
   const out = [];
   for (const r of data?.results || []) {
@@ -77,4 +89,16 @@ export async function search(term) {
     out.push(song);
   }
   return out;
+}
+
+// Pacote inicial gerado no deploy (tools/build-seed.mjs). Retorna null se não existir.
+export async function loadSeed(name = 'sertanejo') {
+  try {
+    const res = await fetch(`data/seed-${name}.json`, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const pack = await res.json();
+    return Array.isArray(pack.songs) && pack.songs.length ? pack : null;
+  } catch {
+    return null;
+  }
 }

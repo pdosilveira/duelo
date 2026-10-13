@@ -3,7 +3,7 @@
 import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd, CONFIG } from './engine.js';
 import { pickDuel } from './matchmaker.js';
 import { createPlayer } from './player.js';
-import { search, rateLimited } from './catalog.js';
+import { search, rateLimited, loadSeed } from './catalog.js';
 
 const STORAGE_KEY = 'duelo:v1';
 const $ = (sel) => document.querySelector(sel);
@@ -221,7 +221,8 @@ function renderDuel() {
         { class: 'empty' },
         el('h2', { text: 'Adicione pelo menos duas músicas' }),
         el('p', { text: n === 1 ? 'Falta só mais uma para o primeiro duelo.' : 'Busque as músicas que você quer comparar.' }),
-        el('button', { class: 'btn', type: 'button', text: 'Buscar músicas', onclick: () => { showTab('songs'); $('#search-input').focus(); } })
+        seedPack ? seedButton() : null,
+        el('button', { class: seedPack ? 'btn ghost' : 'btn', type: 'button', text: 'Buscar músicas', onclick: () => { showTab('songs'); $('#search-input').focus(); } })
       )
     );
     return;
@@ -479,6 +480,55 @@ $('#search-form').addEventListener('submit', async (e) => {
   renderResults();
 });
 
+// ---------- pacote inicial ----------
+
+let seedPack = null;
+
+function missingSeedSongs() {
+  if (!seedPack) return [];
+  return seedPack.songs.filter((x) => {
+    const s = data.songs.find((y) => y.id === x.id);
+    return !s || s.archived;
+  });
+}
+
+function addSeed() {
+  const missing = missingSeedSongs();
+  if (!missing.length) return;
+  const now = Date.now();
+  for (const song of missing) {
+    const existing = data.songs.find((s) => s.id === song.id);
+    if (existing) existing.archived = false;
+    else data.songs.push({ ...song, addedAt: now, archived: false });
+  }
+  save();
+  rebuild();
+  toast(`${missing.length} músicas adicionadas.`);
+  renderSeed();
+  renderCatalog();
+  renderResults();
+  if (currentTab === 'duel') renderDuel();
+}
+
+function seedButton() {
+  const n = missingSeedSongs().length;
+  if (!n) return null;
+  return el('button', { class: 'btn', type: 'button', text: `Adicionar pacote ${seedPack.name} (${n} músicas)`, onclick: addSeed });
+}
+
+function renderSeed() {
+  const box = $('#seed');
+  box.replaceChildren();
+  const btn = seedButton();
+  if (btn) box.append(btn);
+}
+
+loadSeed().then((pack) => {
+  seedPack = pack;
+  renderSeed();
+  if (currentTab === 'duel' && activeSongs().length < 2) renderDuel();
+});
+
 // ---------- backup ----------
 
 $('#export-btn').addEventListener('click', () => {
@@ -518,4 +568,4 @@ $('#import-file').addEventListener('change', async (e) => {
 
 // ---------- início ----------
 
-showTab(activeSongs().length >= 2 ? 'duel' : 'songs');
+showTab('duel');
