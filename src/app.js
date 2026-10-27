@@ -81,16 +81,30 @@ function el(tag, attrs = {}, ...children) {
 const ICONS = {
   play: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.6-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
   pause: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>',
+  archive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg>',
   off: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5z"/><path d="M17 9l4 6M21 9l-4 6"/></svg>',
 };
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, action) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.replaceChildren(msg);
+  if (action) {
+    t.append(
+      el('button', {
+        type: 'button',
+        text: action.label,
+        onclick: () => {
+          t.classList.remove('show');
+          action.run();
+        },
+      })
+    );
+  }
+  t.classList.toggle('has-action', Boolean(action));
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), action ? 5000 : 2600);
 }
 
 function cover(src, cls) {
@@ -179,6 +193,17 @@ function ensurePending() {
   return data.pending;
 }
 
+function archiveButton(song) {
+  const btn = el('button', { class: 'archive', type: 'button', 'aria-label': `Arquivar ${song.title}`, title: 'Arquivar (tirar dos duelos)' });
+  btn.innerHTML = ICONS.archive;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!locked) archiveSong(song.id);
+  });
+  btn.addEventListener('keydown', (e) => e.stopPropagation());
+  return btn;
+}
+
 function duelCard(song, side) {
   const st = getStat(state, song.id);
   const card = el(
@@ -192,6 +217,7 @@ function duelCard(song, side) {
     },
     el('div', { class: 'bg', style: song.art ? `background-image:url("${encodeURI(song.art)}")` : null }),
     cover(song.art, 'cover'),
+    archiveButton(song),
     el(
       'div',
       { class: 'info' },
@@ -393,7 +419,7 @@ function renderRanking() {
     list.append(
       el(
         'li',
-        { class: 'rank-row' },
+        { class: 'rank-row has-play' },
         el('div', { class: 'rank-pos' + (uncertain ? ' uncertain' : ''), text: (uncertain ? '~' : '') + (i + 1), title: uncertain ? 'Posição incerta' : null }),
         cover(r.song.art, 'thumb'),
         el(
@@ -413,7 +439,8 @@ function renderRanking() {
             el('span', { class: 'conf' + (firm ? ' firm' : ''), text: r.confidence }),
             el('span', { text: `${s.games} ${s.games === 1 ? 'duelo' : 'duelos'} (${s.w}V ${s.d}E ${s.l}D)` })
           )
-        )
+        ),
+        playButton(r.song, true)
       )
     );
   });
@@ -453,7 +480,20 @@ function archiveSong(id) {
   rebuild();
   renderCatalog();
   renderResults();
-  toast('Arquivada. Adicione de novo para reativar.');
+  if (currentTab === 'duel') renderDuel();
+  if (currentTab === 'rank') renderRanking();
+  toast('Música arquivada.', {
+    label: 'Desfazer',
+    run: () => {
+      s.archived = false;
+      save();
+      rebuild();
+      renderCatalog();
+      renderResults();
+      if (currentTab === 'rank') renderRanking();
+      if (currentTab === 'duel' && $('#duel-body .empty')) renderDuel();
+    },
+  });
 }
 
 function renderResults() {

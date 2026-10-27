@@ -211,6 +211,7 @@ kbd { font-family: inherit; font-size: .74rem; padding: 1px 6px; border-radius: 
   display: grid; grid-template-columns: 30px 48px 1fr; gap: 12px; align-items: center;
   background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px;
 }
+.rank-row.has-play { grid-template-columns: 30px 48px 1fr auto; }
 .rank-pos { font-family: var(--font-title); font-weight: 700; font-size: 1.1rem; text-align: center; }
 .rank-pos.uncertain { color: var(--muted); font-weight: 500; }
 .thumb { width: 48px; height: 48px; border-radius: 10px; background: var(--surface-2) center / cover no-repeat; }
@@ -267,6 +268,17 @@ section.block h2 { font-size: 1.15rem; margin-bottom: 10px; }
   transition: opacity .2s ease, transform .2s ease;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 14px; }
+.toast button { border: 0; background: none; color: var(--accent); font-weight: 700; padding: 4px 2px; }
+.card .archive {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  width: 34px; height: 34px; border-radius: 50%; border: 0;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--surface) 80%, transparent); color: var(--muted);
+}
+.card .archive svg { width: 17px; height: 17px; }
+.card .archive:hover { color: var(--text); }
+.card .info { padding-right: 30px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
