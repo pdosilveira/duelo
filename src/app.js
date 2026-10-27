@@ -633,10 +633,14 @@ async function syncNow() {
         v._p = 1;
       }
     }
-    const songsOut = data.songs.filter((x) => x._p);
+    // _s = já está no banco (enviada ou recebida); músicas antigas sem a marca sobem uma vez
+    const songsOut = data.songs.filter((x) => !x._s);
     if (songsOut.length) {
       await pushRows('songs', songsOut.map((x) => songToRow(x, data.me)));
-      songsOut.forEach((x) => delete x._p);
+      songsOut.forEach((x) => {
+        delete x._p;
+        x._s = 1;
+      });
       save();
     }
     const votesOut = data.votes.filter((v) => v._p);
@@ -653,7 +657,7 @@ async function syncNow() {
       data.seq.songs = Math.max(data.seq.songs, r.seq);
       if (!known.has(r.id)) {
         known.add(r.id);
-        data.songs.push(rowToSong(r));
+        data.songs.push({ ...rowToSong(r), _s: 1 });
         changed = true;
       }
     }
