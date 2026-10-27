@@ -38,6 +38,15 @@ jobs:
       - name: Gerar pacote inicial (iTunes)
         continue-on-error: true
         run: node tools/build-seed.mjs
+      - name: Checar acesso ao banco (somente leitura)
+        continue-on-error: true
+        run: |
+          URL=$(sed -n "s/.*SUPABASE_URL = '\(.*\)'.*/\1/p" src/config.js)
+          KEY=$(sed -n "s/.*SUPABASE_KEY = '\(.*\)'.*/\1/p" src/config.js)
+          if [ -n "$URL" ]; then
+            curl -sS -f "$URL/rest/v1/votes?select=seq&limit=1" -H "apikey: $KEY" -o /dev/null -w "votes: HTTP %{http_code}\n"
+            curl -sS -f "$URL/rest/v1/songs?select=seq&limit=1" -H "apikey: $KEY" -o /dev/null -w "songs: HTTP %{http_code}\n"
+          fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
