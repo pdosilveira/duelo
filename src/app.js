@@ -2,6 +2,7 @@
 
 import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd, CONFIG } from './engine.js';
 import { pickDuel } from './matchmaker.js';
+import { CUP_SIZE, createCup, currentMatch, recordWinner, champion, roundName } from './cup.js';
 import { createPlayer } from './player.js';
 import { search, rateLimited, loadSeed } from './catalog.js';
 import { syncEnabled, pushRows, pullRows, songToRow, rowToSong, voteToRow, rowToVote } from './sync.js';
@@ -21,6 +22,7 @@ function load() {
         votes: Array.isArray(d.votes) ? d.votes : [],
         pending: d.pending || null,
         me: typeof d.me === 'string' ? d.me : null,
+        cup: d.cup || null,
         seq: d.seq || { votes: 0, songs: 0 },
       };
     }
@@ -165,6 +167,7 @@ function showTab(tab) {
   document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + tab));
   if (tab === 'duel') renderDuel();
+  if (tab === 'cup') renderCup();
   if (tab === 'rank') renderRanking();
   if (tab === 'songs') {
     renderCatalog();
@@ -204,7 +207,7 @@ function archiveButton(song) {
   return btn;
 }
 
-function duelCard(song, side) {
+function duelCard(song, side, { onVote = vote, archive = true } = {}) {
   const st = getStat(state, song.id);
   const card = el(
     'div',
@@ -217,7 +220,7 @@ function duelCard(song, side) {
     },
     el('div', { class: 'bg', style: song.art ? `background-image:url("${encodeURI(song.art)}")` : null }),
     cover(song.art, 'cover'),
-    archiveButton(song),
+    archive ? archiveButton(song) : null,
     el(
       'div',
       { class: 'info' },
@@ -233,11 +236,11 @@ function duelCard(song, side) {
       )
     )
   );
-  card.addEventListener('click', () => vote(side));
+  card.addEventListener('click', () => onVote(side));
   card.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      vote(side);
+      onVote(side);
     }
   });
   return card;
@@ -295,6 +298,23 @@ function renderDuel() {
   locked = false;
 }
 
+// Grava um voto (idempotente pelo id) e atualiza os dois estados.
+function recordVote(id, a, b, r) {
+  if (voteIds.has(id)) return;
+  const v = { id, a, b, r, t: Date.now() };
+  if (syncEnabled) {
+    v.voter = data.me;
+    v._p = 1;
+  }
+  voteIds.add(v.id);
+  data.votes.push(v);
+  const inc = (st) => !st.lastVote || compareVotes(st.lastVote, v) < 0;
+  if (inc(state) && (stateAll === state || inc(stateAll))) {
+    applyVote(state, v);
+    if (stateAll !== state) applyVote(stateAll, v);
+  } else rebuild();
+}
+
 function vote(r) {
   if (locked) return;
   const p = data.pending;
@@ -302,20 +322,7 @@ function vote(r) {
   locked = true;
   player.pause();
 
-  const v = { id: p.id, a: p.a, b: p.b, r, t: Date.now() };
-  if (syncEnabled) {
-    v.voter = data.me;
-    v._p = 1;
-  }
-  if (!voteIds.has(v.id)) {
-    voteIds.add(v.id);
-    data.votes.push(v);
-    const inc = (st) => !st.lastVote || compareVotes(st.lastVote, v) < 0;
-    if (inc(state) && (stateAll === state || inc(stateAll))) {
-      applyVote(state, v);
-      if (stateAll !== state) applyVote(stateAll, v);
-    } else rebuild();
-  }
+  recordVote(p.id, p.a, p.b, r);
   data.pending = null;
   save();
   scheduleSync();
@@ -337,7 +344,17 @@ function vote(r) {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (currentTab !== 'duel' || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (currentTab === 'cup') {
+    const tag = document.activeElement?.tagName;
+    const side = { ArrowLeft: 'A', ArrowRight: 'B' }[e.key];
+    if (side && tag !== 'INPUT' && currentMatch(data.cup)) {
+      e.preventDefault();
+      cupVote(side);
+    }
+    return;
+  }
+  if (currentTab !== 'duel') return;
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   const map = { ArrowLeft: 'A', ArrowRight: 'B', ArrowDown: 'D' };
@@ -346,6 +363,142 @@ document.addEventListener('keydown', (e) => {
     vote(map[e.key]);
   }
 });
+
+// ---------- mata-mata ----------
+
+let cupLocked = false;
+
+function newCup() {
+  const ids = activeSongs().map((x) => x.id);
+  data.cup = createCup(ids, newId);
+  save();
+  renderCup();
+}
+
+function cupVote(side) {
+  if (cupLocked) return;
+  const cur = currentMatch(data.cup);
+  if (!cur) return;
+  const { match } = cur;
+  if (!songById(match.a) || !songById(match.b)) return;
+  cupLocked = true;
+  player.pause();
+  recordVote(match.vid, match.a, match.b, side);
+  recordWinner(data.cup, side === 'A' ? match.a : match.b, newId);
+  save();
+  scheduleSync();
+
+  const body = $('#cup-body');
+  const arena = body.querySelector('.arena');
+  arena?.classList.remove('entering');
+  arena?.querySelectorAll('.card').forEach((c) => c.classList.add(c.dataset.side === side ? 'chosen' : 'dimmed'));
+  setTimeout(() => arena?.classList.add('leaving'), 300);
+  setTimeout(() => {
+    cupLocked = false;
+    if (currentTab === 'cup') renderCup();
+  }, 480);
+}
+
+function bracket(cup) {
+  const box = el('div', { class: 'bracket' });
+  const cur = currentMatch(cup);
+  cup.rounds.forEach((round, r) => {
+    const list = el('ol', { class: 'bracket-round' });
+    round.forEach((m, i) => {
+      const live = cur && cur.round === r && cur.index === i;
+      const name = (id) => {
+        const s = songById(id);
+        const cls = m.w ? (m.w === id ? 'won' : 'lost') : '';
+        return el('div', { class: 'bk-song ' + cls }, cover(s?.art, 'bk-thumb'), el('span', { text: s ? s.title : '—' }));
+      };
+      list.append(el('li', { class: 'bk-match' + (live ? ' live' : '') }, name(m.a), name(m.b)));
+    });
+    box.append(el('h3', { text: roundName(round.length) }), list);
+  });
+  return box;
+}
+
+function renderCup() {
+  const body = $('#cup-body');
+  body.replaceChildren();
+  const cup = data.cup;
+  const sub = $('#cup-sub');
+  sub.textContent = '';
+
+  if (syncEnabled && !data.me) {
+    body.append(el('div', { class: 'empty' }, el('h2', { text: 'Escolha seu nome primeiro' }), el('button', { class: 'btn', type: 'button', text: 'Ir para o duelo', onclick: () => showTab('duel') })));
+    return;
+  }
+
+  if (!cup) {
+    const n = activeSongs().length;
+    const enough = n >= CUP_SIZE;
+    body.append(
+      el(
+        'div',
+        { class: 'empty' },
+        el('h2', { text: 'Mata-mata' }),
+        el('p', {
+          text: enough
+            ? `${CUP_SIZE} músicas sorteadas do seu catálogo, das oitavas até a final. Sem empate: alguém tem que passar. Cada jogo também conta para o ranking.`
+            : `Você precisa de pelo menos ${CUP_SIZE} músicas no catálogo (tem ${n}).`,
+        }),
+        enough
+          ? el('button', { class: 'btn', type: 'button', text: 'Sortear chaveamento', onclick: newCup })
+          : el('button', { class: 'btn', type: 'button', text: 'Adicionar músicas', onclick: () => showTab('songs') })
+      )
+    );
+    return;
+  }
+
+  const champ = champion(cup);
+  if (champ) {
+    const s = songById(champ);
+    sub.textContent = 'Fim de jogo';
+    body.append(
+      el(
+        'div',
+        { class: 'champion' },
+        el('div', { class: 'trophy', text: '🏆' }),
+        cover(s?.art, 'champ-cover'),
+        el('p', { class: 'champ-label', text: 'Campeã' }),
+        el('h2', { text: s?.title || '—' }),
+        el('p', { class: 'muted', text: s?.artist || '' }),
+        el('div', { class: 'champ-actions' }, s ? playButton(s) : null, el('button', { class: 'btn', type: 'button', text: 'Novo mata-mata', onclick: newCup }))
+      ),
+      bracket(cup)
+    );
+    return;
+  }
+
+  const cur = currentMatch(cup);
+  const round = cup.rounds[cur.round];
+  sub.textContent = `${roundName(round.length)} · jogo ${cur.index + 1} de ${round.length}`;
+  const a = songById(cur.match.a);
+  const b = songById(cur.match.b);
+  const arena = el('div', { class: 'arena entering' });
+  if (a && b) {
+    arena.append(
+      duelCard(a, 'A', { onVote: cupVote, archive: false }),
+      el('div', { class: 'tie-row' }, el('span', { class: 'vs', text: 'x' })),
+      duelCard(b, 'B', { onVote: cupVote, archive: false })
+    );
+  } else {
+    arena.append(el('p', { class: 'note', text: 'Uma música deste jogo não está mais disponível.' }));
+  }
+  body.append(
+    arena,
+    bracket(cup),
+    el('div', { class: 'cup-reset' }, el('button', {
+      class: 'btn ghost small',
+      type: 'button',
+      text: 'Sortear outro chaveamento',
+      onclick: () => {
+        if (confirm('Descartar este mata-mata e sortear outro? Os votos já dados continuam valendo no ranking.')) newCup();
+      },
+    }))
+  );
+}
 
 // ---------- ranking ----------
 

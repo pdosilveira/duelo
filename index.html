@@ -205,6 +205,28 @@ kbd { font-family: inherit; font-size: .74rem; padding: 1px 6px; border-radius: 
   .keys { display: block; }
 }
 
+/* ---------- mata-mata ---------- */
+#view-cup .arena { min-height: 360px; height: calc(100dvh - var(--tabbar) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 120px); max-height: 640px; }
+.vs { font-family: var(--font-title); font-weight: 700; color: var(--muted); font-size: 1.1rem; padding: 4px 0; }
+.bracket { margin-top: 26px; }
+.bracket h3 { font-size: 1rem; margin: 18px 2px 8px; color: var(--muted); }
+.bracket-round { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.bk-match { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.bk-match.live { box-shadow: 0 0 0 2px var(--accent); }
+.bk-song { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 9px; font-size: .9rem; min-width: 0; }
+.bk-song span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-song.won { background: var(--accent-soft); font-weight: 600; }
+.bk-song.lost { opacity: .45; text-decoration: line-through; }
+.bk-thumb { flex: none; width: 28px; height: 28px; border-radius: 6px; background: var(--surface-2) center / cover no-repeat; }
+.cup-reset { display: flex; justify-content: center; margin-top: 22px; }
+.champion { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0 4px; }
+.champion .trophy { font-size: 2.4rem; animation: enter .5s ease both; }
+.champ-cover { width: min(62vw, 260px); aspect-ratio: 1; border-radius: 22px; background: var(--surface-2) center / cover no-repeat; box-shadow: 0 0 0 3px var(--accent), var(--shadow); }
+.champ-label { margin: 10px 0 0; text-transform: uppercase; letter-spacing: .12em; font-size: .78rem; font-weight: 700; color: var(--accent); }
+.champion h2 { font-size: 1.5rem; }
+.champion .muted { margin: 0; }
+.champ-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+
 /* ---------- ranking ---------- */
 .rank-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .rank-row {
@@ -297,6 +319,14 @@ section.block h2 { font-size: 1.15rem; margin-bottom: 10px; }
     <p class="credit">Prévias e capas fornecidas pela Apple</p>
   </section>
 
+  <section id="view-cup" class="view" aria-labelledby="cup-h">
+    <div class="view-head">
+      <h1 id="cup-h">Mata-mata</h1>
+      <span class="sub" id="cup-sub"></span>
+    </div>
+    <div id="cup-body"></div>
+  </section>
+
   <section id="view-rank" class="view" aria-labelledby="rank-h">
     <div class="view-head">
       <h1 id="rank-h">Ranking</h1>
@@ -343,6 +373,10 @@ section.block h2 { font-size: 1.15rem; margin-bottom: 10px; }
     <button class="tab" role="tab" data-tab="duel" aria-selected="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="7.5" height="14" rx="2"/><rect x="13.5" y="5" width="7.5" height="14" rx="2"/></svg>
       Duelo
+    </button>
+    <button class="tab" role="tab" data-tab="cup" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>
+      Mata-mata
     </button>
     <button class="tab" role="tab" data-tab="rank" aria-selected="false">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>
