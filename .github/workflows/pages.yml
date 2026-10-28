@@ -47,6 +47,13 @@ jobs:
             curl -sS -f "$URL/rest/v1/votes?select=seq&limit=1" -H "apikey: $KEY" -o /dev/null -w "votes: HTTP %{http_code}\n"
             curl -sS -f "$URL/rest/v1/songs?select=seq&limit=1" -H "apikey: $KEY" -o /dev/null -w "songs: HTTP %{http_code}\n"
           fi
+      - name: Versionar arquivos (força o navegador a baixar a versão nova)
+        run: |
+          V=${GITHUB_SHA::8}
+          sed -i "s#src=\"src/app.js\"#src=\"src/app.js?v=$V\"#" index.html
+          sed -i -E "s#from '(\./[a-z0-9]+\.js)'#from '\1?v=$V'#g" src/*.js
+          grep -o 'src/app.js?v=[a-z0-9]*' index.html
+          grep -h -o "from '[^']*'" src/app.js | head -3
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
