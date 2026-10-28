@@ -205,6 +205,41 @@ kbd { font-family: inherit; font-size: .74rem; padding: 1px 6px; border-radius: 
   .keys { display: block; }
 }
 
+/* ---------- modo nota ---------- */
+#duel-mode .seg { margin-bottom: 10px; }
+#duel-mode:empty { display: none; }
+.rate { display: flex; flex-direction: column; gap: 12px; }
+.rate-song { display: flex; align-items: center; gap: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 12px; box-shadow: var(--shadow); }
+.rate-cover { flex: none; width: 96px; height: 96px; border-radius: 14px; background: var(--surface-2) center / cover no-repeat; }
+.rate-info { flex: 1; min-width: 0; }
+.rate-info .title { font-family: var(--font-title); font-weight: 700; font-size: 1.15rem; line-height: 1.2; }
+.rate-info .artist { color: var(--muted); font-size: .92rem; }
+.rate-hint { font-size: .78rem; margin: 6px 0 0; }
+.notes { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.note-btn {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 8px 12px;
+}
+.note-btn b { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-title); background: var(--surface-2); }
+.note-btn span { font-size: .9rem; line-height: 1.25; }
+.note-btn[data-n="10"] b, .note-btn[data-n="9"] b, .note-btn[data-n="8"] b { background: var(--accent); color: var(--on-accent); }
+.note-btn[data-n="7"] b, .note-btn[data-n="6"] b { background: var(--accent-soft); color: var(--accent); }
+.note-btn:active { transform: scale(.98); }
+@media (hover: hover) { .note-btn:hover { border-color: var(--accent); } }
+.rate-actions { display: flex; justify-content: center; gap: 10px; }
+.tune-bar { display: flex; justify-content: space-between; gap: 8px; font-size: .85rem; color: var(--muted); padding: 0 4px; }
+.tune-note { font-weight: 700; color: var(--accent); }
+.tune-skip { display: flex; justify-content: center; }
+.linkish { border: 0; background: none; color: var(--muted); font-size: .82rem; text-decoration: underline; padding: 4px; }
+@media (min-width: 760px) {
+  .notes { grid-template-columns: 1fr 1fr; }
+  .rate { max-width: 760px; margin: 0 auto; width: 100%; }
+  #duel-body.arena { position: relative; }
+  .tune-bar, .tune-skip { position: absolute; left: 0; right: 0; }
+  .tune-bar { top: -4px; }
+  .tune-skip { bottom: -4px; }
+}
+
 /* ---------- mata-mata ---------- */
 #view-cup .arena { min-height: 360px; height: calc(100dvh - var(--tabbar) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 120px); max-height: 640px; }
 .vs { font-family: var(--font-title); font-weight: 700; color: var(--muted); font-size: 1.1rem; padding: 4px 0; }
@@ -314,6 +349,7 @@ section.block h2 { font-size: 1.15rem; margin-bottom: 10px; }
       <h1 id="duel-h">Qual você prefere?</h1>
       <span class="sub" id="duel-count"></span>
     </div>
+    <div id="duel-mode"></div>
     <div id="duel-body" class="arena"></div>
     <p class="keys"><kbd>←</kbd> esquerda · <kbd>↓</kbd> empate · <kbd>→</kbd> direita</p>
     <p class="credit">Prévias e capas fornecidas pela Apple</p>

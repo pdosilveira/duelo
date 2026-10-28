@@ -2,6 +2,7 @@
 
 import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd, CONFIG } from './engine.js';
 import { pickDuel } from './matchmaker.js';
+import { TUNE_DUELS, NOTES, latestNotes, noteTarget, pickTuneOpponent, pickSongToRate } from './tune.js';
 import { CUP_SIZE, createCup, currentMatch, recordWinner, champion, roundName } from './cup.js';
 import { createPlayer } from './player.js';
 import { search, rateLimited, loadSeed } from './catalog.js';
@@ -23,13 +24,17 @@ function load() {
         pending: d.pending || null,
         me: typeof d.me === 'string' ? d.me : null,
         cup: d.cup || null,
+        notes: Array.isArray(d.notes) ? d.notes : [],
+        mode: d.mode === 'note' ? 'note' : 'free',
+        tune: d.tune || null,
+        rateSong: d.rateSong || null,
         seq: d.seq || { votes: 0, songs: 0 },
       };
     }
   } catch (e) {
     console.warn('Falha ao ler dados', e);
   }
-  return { songs: [], votes: [], pending: null, me: null, seq: { votes: 0, songs: 0 } };
+  return { songs: [], votes: [], pending: null, me: null, seq: { votes: 0, songs: 0 }, notes: [], mode: 'free', tune: null, rateSong: null };
 }
 
 let data = load();
@@ -47,6 +52,10 @@ function save() {
     toast('Não foi possível salvar. Exporte um backup.');
   }
 }
+
+// Minhas notas (a mais recente de cada música). Só orientam os duelos de ajuste.
+const myNotes = () => latestNotes(data.notes.filter(isMine));
+const noteLabel = (n) => NOTES.find((x) => x[0] === n)?.[1] || '';
 
 function rebuild() {
   state = replay(data.songs, data.votes.filter(isMine));
@@ -252,6 +261,7 @@ function renderDuel() {
   count.textContent = state.history.count ? `${state.history.count} ${state.history.count === 1 ? 'duelo' : 'duelos'}` : '';
   body.className = 'arena';
   body.replaceChildren();
+  $('#duel-mode').replaceChildren();
 
   if (syncEnabled && !data.me) {
     const input = el('input', { type: 'text', maxlength: '40', autocomplete: 'given-name', placeholder: 'Seu nome', 'aria-label': 'Seu nome' });
@@ -285,6 +295,9 @@ function renderDuel() {
     );
     return;
   }
+
+  renderModeSwitch();
+  if (data.mode === 'note') return renderNoteMode(body);
 
   const p = ensurePending();
   const a = songById(p.a);
@@ -355,6 +368,21 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (currentTab !== 'duel') return;
+  if (data.mode === 'note' && activeSongs().length >= 2) {
+    const tag0 = document.activeElement?.tagName;
+    if (tag0 === 'INPUT' || tag0 === 'TEXTAREA') return;
+    if (tuneActive()) {
+      const r = { ArrowLeft: 'A', ArrowRight: 'B', ArrowDown: 'D' }[e.key];
+      if (r) {
+        e.preventDefault();
+        tuneVote(r);
+      }
+    } else if (/^[0-9]$/.test(e.key) && data.rateSong) {
+      e.preventDefault();
+      giveNote(e.key === '0' ? 10 : Number(e.key));
+    }
+    return;
+  }
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   const map = { ArrowLeft: 'A', ArrowRight: 'B', ArrowDown: 'D' };
@@ -363,6 +391,200 @@ document.addEventListener('keydown', (e) => {
     vote(map[e.key]);
   }
 });
+
+// ---------- modo nota ----------
+
+function renderModeSwitch() {
+  const box = $('#duel-mode');
+  const seg = el('div', { class: 'seg', role: 'tablist', 'aria-label': 'Modo' });
+  for (const [mode, label] of [['free', 'Duelo livre'], ['note', 'Nota']]) {
+    seg.append(
+      el('button', {
+        type: 'button',
+        role: 'tab',
+        'aria-selected': String(data.mode === mode),
+        text: label,
+        onclick: () => {
+          if (data.mode === mode) return;
+          player.pause();
+          data.mode = mode;
+          save();
+          renderDuel();
+        },
+      })
+    );
+  }
+  box.replaceChildren(seg);
+}
+
+function tuneActive() {
+  const t = data.tune;
+  if (!t) return false;
+  const s = songById(t.song);
+  if (!s || s.archived || t.done >= TUNE_DUELS) {
+    data.tune = null;
+    save();
+    return false;
+  }
+  return true;
+}
+
+function giveNote(n) {
+  const id = data.rateSong;
+  if (!id || locked) return;
+  player.pause();
+  const note = { id: newId(), song: id, n, t: Date.now() };
+  if (syncEnabled) {
+    note.voter = data.me;
+    note._p = 1;
+  }
+  data.notes.push(note);
+  data.tune = { song: id, note: n, done: 0, faced: [], pending: null };
+  data.rateSong = null;
+  save();
+  scheduleSync();
+  renderDuel();
+}
+
+const rateSkips = new Set();
+
+function renderRateScreen(body) {
+  const ids = activeSongs().map((x) => x.id);
+  const notes = myNotes();
+  if (!data.rateSong || notes.has(data.rateSong) || !ids.includes(data.rateSong)) {
+    data.rateSong = pickSongToRate(state, ids, notes, rateSkips);
+    if (!data.rateSong && rateSkips.size) {
+      rateSkips.clear();
+      data.rateSong = pickSongToRate(state, ids, notes, rateSkips);
+    }
+    save();
+  }
+  const song = songById(data.rateSong);
+  if (!song) {
+    body.append(
+      el(
+        'div',
+        { class: 'empty' },
+        el('h2', { text: 'Todas as músicas já têm nota' }),
+        el('p', { text: 'Adicione mais músicas ou volte para o duelo livre.' }),
+        el('button', { class: 'btn', type: 'button', text: 'Duelo livre', onclick: () => { data.mode = 'free'; save(); renderDuel(); } })
+      )
+    );
+    return;
+  }
+  const grid = el('div', { class: 'notes' });
+  for (const [n, label] of NOTES) {
+    grid.append(el('button', { type: 'button', class: 'note-btn', 'data-n': String(n), onclick: () => giveNote(n) }, el('b', { text: String(n) }), el('span', { text: label })));
+  }
+  body.className = 'rate';
+  body.append(
+    el(
+      'div',
+      { class: 'rate-song' },
+      cover(song.art, 'rate-cover'),
+      el('div', { class: 'rate-info' }, el('div', { class: 'title', text: song.title }), el('div', { class: 'artist', text: song.artist }), el('p', { class: 'muted rate-hint', text: 'Que nota você dá? Ela só serve para escolher os duelos de ajuste.' })),
+      playButton(song)
+    ),
+    grid,
+    el(
+      'div',
+      { class: 'rate-actions' },
+      el('button', {
+        class: 'btn ghost small',
+        type: 'button',
+        text: 'Pular',
+        onclick: () => {
+          player.pause();
+          rateSkips.add(song.id);
+          data.rateSong = null;
+          renderDuel();
+        },
+      }),
+      el('button', { class: 'btn ghost small', type: 'button', text: 'Arquivar', onclick: () => archiveSong(song.id) })
+    )
+  );
+}
+
+function renderNoteMode(body) {
+  if (!tuneActive()) return renderRateScreen(body);
+  const t = data.tune;
+  const now = Date.now();
+  const p = t.pending;
+  const valid = p && !voteIds.has(p.id) && songById(p.a) && songById(p.b) && !songById(p.a).archived && !songById(p.b).archived;
+  if (!valid) {
+    const ids = activeSongs().map((x) => x.id);
+    const st = getStat(state, t.song);
+    // 1º duelo parte da região da nota; os seguintes acompanham a posição já ajustada
+    const target = t.done === 0 ? noteTarget(state, ids, t.note, myNotes(), t.song) : st.rating;
+    const opp = pickTuneOpponent(state, ids, t.song, target, new Set(t.faced), now);
+    if (!opp) {
+      data.tune = null;
+      save();
+      return renderRateScreen(body);
+    }
+    t.pending = Math.random() < 0.5 ? { id: newId(), a: t.song, b: opp } : { id: newId(), a: opp, b: t.song };
+    save();
+  }
+  const song = songById(t.song);
+  body.append(
+    el(
+      'div',
+      { class: 'tune-bar' },
+      el('span', { text: `Ajuste fino · duelo ${t.done + 1} de ${TUNE_DUELS}` }),
+      el('span', { class: 'tune-note', text: `Sua nota: ${t.note}` })
+    ),
+    duelCard(songById(t.pending.a), 'A', { onVote: tuneVote }),
+    el('div', { class: 'tie-row' }, el('button', { class: 'tie', type: 'button', text: 'Empate', onclick: () => tuneVote('D') })),
+    duelCard(songById(t.pending.b), 'B', { onVote: tuneVote }),
+    el('div', { class: 'tune-skip' }, el('button', {
+      class: 'linkish',
+      type: 'button',
+      text: `Encerrar ajuste de “${song.title}”`,
+      onclick: () => {
+        data.tune = null;
+        save();
+        renderDuel();
+      },
+    }))
+  );
+  body.classList.add('entering');
+  locked = false;
+}
+
+function tuneVote(r) {
+  if (locked || !tuneActive()) return;
+  const t = data.tune;
+  const p = t.pending;
+  if (!p) return;
+  locked = true;
+  player.pause();
+  recordVote(p.id, p.a, p.b, r);
+  t.faced.push(p.a === t.song ? p.b : p.a);
+  t.done++;
+  t.pending = null;
+  const finished = t.done >= TUNE_DUELS;
+  const title = songById(t.song)?.title;
+  if (finished) data.tune = null;
+  save();
+  scheduleSync();
+
+  const body = $('#duel-body');
+  body.classList.remove('entering');
+  body.querySelectorAll('.card').forEach((c) => {
+    if (r === 'D') c.classList.add('tied');
+    else c.classList.add(c.dataset.side === r ? 'chosen' : 'dimmed');
+  });
+  if (r === 'D') body.querySelector('.tie')?.classList.add('chosen');
+  setTimeout(() => body.classList.add('leaving'), 300);
+  setTimeout(() => {
+    if (finished) {
+      const pos = ranking(state, Date.now()).findIndex((x) => x.song.id === t.song) + 1;
+      toast(`Ajuste feito: “${title}” está em ${pos}º no seu ranking.`);
+    }
+    if (currentTab === 'duel') renderDuel();
+    else locked = false;
+  }, 480);
+}
 
 // ---------- mata-mata ----------
 
@@ -565,6 +787,7 @@ function renderRanking() {
 
   body.append(el('p', { class: 'legend', text: `Ordenado pela pontuação conservadora (nota − ${CONFIG.K}×incerteza). A barra mostra a faixa provável da nota.` }));
   const list = el('ol', { class: 'rank-list' });
+  const notesNow = myNotes();
   rows.forEach((r, i) => {
     const s = r.stat;
     const firm = r.rd < 80;
@@ -590,7 +813,7 @@ function renderRanking() {
             'div',
             { class: 'rank-foot' },
             el('span', { class: 'conf' + (firm ? ' firm' : ''), text: r.confidence }),
-            el('span', { text: `${s.games} ${s.games === 1 ? 'duelo' : 'duelos'} (${s.w}V ${s.d}E ${s.l}D)` })
+            el('span', { text: `${notesNow.has(r.song.id) ? `Nota ${notesNow.get(r.song.id).n} · ` : ''}${s.games} ${s.games === 1 ? 'duelo' : 'duelos'} (${s.w}V ${s.d}E ${s.l}D)` })
           )
         ),
         playButton(r.song, true)
@@ -628,6 +851,9 @@ function archiveSong(id) {
   if (!s) return;
   s.archived = true;
   if (data.pending && (data.pending.a === id || data.pending.b === id)) data.pending = null;
+  if (data.tune?.song === id) data.tune = null;
+  else if (data.tune?.pending && (data.tune.pending.a === id || data.tune.pending.b === id)) data.tune.pending = null;
+  if (data.rateSong === id) data.rateSong = null;
   if (player.state.id === id) player.pause();
   save();
   rebuild();
@@ -842,6 +1068,18 @@ async function syncNow() {
       votesOut.forEach((v) => delete v._p);
       save();
     }
+    for (const x of data.notes) {
+      if (!x.voter) {
+        x.voter = data.me;
+        x._p = 1;
+      }
+    }
+    const notesOut = data.notes.filter((x) => x._p);
+    if (notesOut.length) {
+      await pushRows('ratings', notesOut.map((x) => ({ id: x.id, song: x.song, n: x.n, t: x.t, voter: x.voter })));
+      notesOut.forEach((x) => delete x._p);
+      save();
+    }
 
     let changed = false;
     const songRows = await pullRows('songs', 'seq,id,title,artist,album,art,preview,link,itunes_id,added_at', data.seq.songs);
@@ -851,6 +1089,16 @@ async function syncNow() {
       if (!known.has(r.id)) {
         known.add(r.id);
         data.songs.push({ ...rowToSong(r), _s: 1 });
+        changed = true;
+      }
+    }
+    const noteIds = new Set(data.notes.map((x) => x.id));
+    const noteRows = await pullRows('ratings', 'seq,id,song,n,t,voter', data.seq.ratings || 0);
+    for (const r of noteRows) {
+      data.seq.ratings = Math.max(data.seq.ratings || 0, r.seq);
+      if (!noteIds.has(r.id)) {
+        noteIds.add(r.id);
+        data.notes.push({ id: r.id, song: r.song, n: Number(r.n), t: Number(r.t), voter: r.voter });
         changed = true;
       }
     }
