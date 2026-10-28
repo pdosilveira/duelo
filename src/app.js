@@ -256,6 +256,7 @@ function duelCard(song, side, { onVote = vote, archive = true } = {}) {
 }
 
 function renderDuel() {
+  locked = false; // a animação do voto anterior já terminou quando a tela é redesenhada
   const body = $('#duel-body');
   const count = $('#duel-count');
   count.textContent = state.history.count ? `${state.history.count} ${state.history.count === 1 ? 'duelo' : 'duelos'}` : '';
