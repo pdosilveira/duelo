@@ -58,3 +58,25 @@ export function recordWinner(cup, winner, newId, rng = Math.random) {
   }
   return true;
 }
+
+// A música ainda disputa o mata-mata? (está na rodada atual e não foi eliminada)
+export function cupAlive(cup, id) {
+  if (!cup || champion(cup)) return false;
+  const last = cup.rounds[cup.rounds.length - 1];
+  return last.some((m) => (m.w ? m.w === id : m.a === id || m.b === id));
+}
+
+// Substituta assume a vaga em todo o chaveamento; jogos ainda não disputados ganham id de voto novo.
+export function replaceInCup(cup, oldId, newIdSong, newId) {
+  for (const round of cup.rounds) {
+    for (const m of round) {
+      const hit = m.a === oldId || m.b === oldId;
+      if (m.a === oldId) m.a = newIdSong;
+      if (m.b === oldId) m.b = newIdSong;
+      if (m.w === oldId) m.w = newIdSong;
+      if (hit && !m.w) m.vid = newId();
+    }
+  }
+}
+
+export const cupPlayed = (cup) => cup.rounds.reduce((n, r) => n + r.filter((m) => m.w).length, 0);

@@ -3,8 +3,8 @@
 import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd, CONFIG } from './engine.js';
 import { pickDuel, pickParticipants, pairByInformation } from './matchmaker.js';
 import { TUNE_DUELS, NOTES, latestNotes, noteTarget, pickTuneOpponent, pickSongToRate } from './tune.js';
-import { SWISS_SIZE, SWISS_ROUNDS, createSwiss, currentSwissMatch, recordSwiss, swissDone, table as swissTable } from './swiss.js';
-import { CUP_SIZE, createCup, currentMatch, recordWinner, champion, roundName } from './cup.js';
+import { SWISS_SIZE, SWISS_ROUNDS, createSwiss, currentSwissMatch, recordSwiss, swissDone, table as swissTable, swissAlive, replaceInSwiss, swissPlayed } from './swiss.js';
+import { CUP_SIZE, createCup, currentMatch, recordWinner, champion, roundName, cupAlive, replaceInCup, cupPlayed } from './cup.js';
 import { createPlayer } from './player.js';
 import { search, rateLimited, loadSeed } from './catalog.js';
 import { syncEnabled, pushRows, pullRows, songToRow, rowToSong, voteToRow, rowToVote } from './sync.js';
@@ -213,7 +213,7 @@ function archiveButton(song) {
   btn.innerHTML = ICONS.archive;
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!locked) archiveSong(song.id);
+    if (!locked && !cupLocked && !swissLocked) archiveSong(song.id);
   });
   btn.addEventListener('keydown', (e) => e.stopPropagation());
   return btn;
@@ -743,9 +743,9 @@ function renderCup() {
   const arena = el('div', { class: 'arena entering' });
   if (a && b) {
     arena.append(
-      duelCard(a, 'A', { onVote: cupVote, archive: false }),
+      duelCard(a, 'A', { onVote: cupVote }),
       el('div', { class: 'tie-row' }, el('span', { class: 'vs', text: 'x' })),
-      duelCard(b, 'B', { onVote: cupVote, archive: false })
+      duelCard(b, 'B', { onVote: cupVote })
     );
   } else {
     arena.append(el('p', { class: 'note', text: 'Uma música deste jogo não está mais disponível.' }));
@@ -885,9 +885,9 @@ function renderSwiss(body) {
   const arena = el('div', { class: 'arena entering' });
   if (a && b) {
     arena.append(
-      duelCard(a, 'A', { onVote: swissVote, archive: false }),
+      duelCard(a, 'A', { onVote: swissVote }),
       el('div', { class: 'tie-row' }, el('button', { class: 'tie', type: 'button', text: 'Empate', onclick: () => swissVote('D') })),
-      duelCard(b, 'B', { onVote: swissVote, archive: false })
+      duelCard(b, 'B', { onVote: swissVote })
     );
   } else {
     arena.append(el('p', { class: 'note', text: 'Uma música deste jogo não está mais disponível.' }));
@@ -1040,21 +1040,52 @@ function archiveSong(id) {
   else if (data.tune?.pending && (data.tune.pending.a === id || data.tune.pending.b === id)) data.tune.pending = null;
   if (data.rateSong === id) data.rateSong = null;
   if (player.state.id === id) player.pause();
+
+  // Torneios em andamento: uma substituta (mesma metodologia dos duelos) assume a vaga.
+  const subs = [];
+  const now = Date.now();
+  const pickSub = (taken) => {
+    const pool = activeSongs().map((x) => x.id).filter((x) => !taken.has(x));
+    return pool.length ? pickParticipants(state, pool, 1, now)[0] : null;
+  };
+  if (cupAlive(data.cup, id)) {
+    const sub = pickSub(new Set(data.cup.rounds.flatMap((r) => r.flatMap((m) => [m.a, m.b]))));
+    if (sub) {
+      replaceInCup(data.cup, id, sub, newId);
+      subs.push({ kind: 'cup', sub, played: cupPlayed(data.cup) });
+    }
+  }
+  if (swissAlive(data.swiss, id)) {
+    const sub = pickSub(new Set(data.swiss.players));
+    if (sub) {
+      replaceInSwiss(data.swiss, id, sub, newId);
+      subs.push({ kind: 'swiss', sub, played: swissPlayed(data.swiss) });
+    }
+  }
+
   save();
   rebuild();
   renderCatalog();
   renderResults();
   if (currentTab === 'duel') renderDuel();
   if (currentTab === 'rank') renderRanking();
-  toast('Música arquivada.', {
+  if (currentTab === 'cup') renderCup();
+  const subTitles = [...new Set(subs.map((x) => songById(x.sub)?.title))];
+  toast(subs.length ? `Arquivada. Entrou “${subTitles.join('” e “')}”.` : 'Música arquivada.', {
     label: 'Desfazer',
     run: () => {
       s.archived = false;
+      // devolve a vaga se a substituta ainda não jogou
+      for (const x of subs) {
+        if (x.kind === 'cup' && data.cup && cupPlayed(data.cup) === x.played && cupAlive(data.cup, x.sub)) replaceInCup(data.cup, x.sub, id, newId);
+        if (x.kind === 'swiss' && data.swiss && swissPlayed(data.swiss) === x.played && swissAlive(data.swiss, x.sub)) replaceInSwiss(data.swiss, x.sub, id, newId);
+      }
       save();
       rebuild();
       renderCatalog();
       renderResults();
       if (currentTab === 'rank') renderRanking();
+      if (currentTab === 'cup') renderCup();
       if (currentTab === 'duel' && $('#duel-body .empty')) renderDuel();
     },
   });

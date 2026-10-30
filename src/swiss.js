@@ -123,3 +123,20 @@ export function recordSwiss(sw, r, newId, rng = Math.random, opts = {}) {
   if (!currentSwissMatch(sw) && sw.rounds.length < SWISS_ROUNDS) pairRound(sw, newId, rng, opts);
   return true;
 }
+
+export const swissAlive = (sw, id) => Boolean(sw) && !swissDone(sw) && sw.players.includes(id);
+
+// Substituta herda a vaga: pontos, campanha e confrontos já disputados.
+export function replaceInSwiss(sw, oldId, newIdSong, newId) {
+  sw.players = sw.players.map((p) => (p === oldId ? newIdSong : p));
+  for (const round of sw.rounds) {
+    for (const m of round) {
+      const hit = m.a === oldId || m.b === oldId;
+      if (m.a === oldId) m.a = newIdSong;
+      if (m.b === oldId) m.b = newIdSong;
+      if (hit && !m.r) m.vid = newId();
+    }
+  }
+}
+
+export const swissPlayed = (sw) => sw.rounds.reduce((n, r) => n + r.filter((m) => m.r).length, 0);
