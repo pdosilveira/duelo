@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Duelo de Faixas: ranking pessoal de músicas por comparações em pares (Glicko-2).",
   "scripts": {
-    "test": "node --test test/glicko2.test.js test/engine.test.js test/matchmaker.test.js test/cup.test.js test/tune.test.js test/swiss.test.js test/tournament-method.test.js test/replace.test.js",
+    "test": "node --test test/glicko2.test.js test/engine.test.js test/matchmaker.test.js test/cup.test.js test/tune.test.js test/swiss.test.js test/tournament-method.test.js test/replace.test.js test/artists.test.js",
     "simulate": "node test/simulate.js"
   }
 }

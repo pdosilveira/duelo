@@ -206,3 +206,23 @@ export function pairByInformation(state, ids, now, rng = Math.random, forbid = (
   }
   return null;
 }
+
+// ---------- calibrar uma música: âncora fixa, adversária pela metodologia dos duelos ----------
+
+// avoid: adversárias já usadas nesta calibração. Respeita o resfriamento de pares
+// (relaxa se não houver opção) e evita repetir músicas do duelo anterior.
+export function pickOpponentFor(state, anchor, now, rng = Math.random, avoid = new Set()) {
+  const ids = [];
+  for (const s of state.songs.values()) if (!s.archived && s.id !== anchor) ids.push(s.id);
+  ids.sort();
+  if (!ids.length) return null;
+  const ctx = tourContext(state, [anchor, ...ids], now);
+  const last = new Set(state.history.last || []);
+  let pool = ids.filter((id) => !avoid.has(id) && !last.has(id));
+  if (!pool.length) pool = ids.filter((id) => !avoid.has(id));
+  if (!pool.length) pool = ids;
+  const fresh = pool.filter((id) => !ctx.blocked(anchor, id));
+  const cands = fresh.length ? fresh : pool;
+  if (rng() < MM.explore) return cands[Math.floor(rng() * cands.length)];
+  return weightedPick(cands, (id) => ctx.oppWeight(anchor, id), rng);
+}

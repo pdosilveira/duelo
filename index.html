@@ -291,6 +291,17 @@ kbd { font-family: inherit; font-size: .74rem; padding: 1px 6px; border-radius: 
   background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px;
 }
 .rank-row.has-play { grid-template-columns: 30px 48px 1fr auto; }
+.row-actions { display: flex; flex-direction: column; gap: 6px; }
+.play.calib { background: var(--surface-2); color: var(--text); }
+.rank-row.flash { animation: flash 1.6s ease 2; }
+@keyframes flash { 50% { box-shadow: 0 0 0 3px var(--accent); } }
+#rank-body > .seg { margin-bottom: 10px; }
+.artist-row { cursor: pointer; }
+.artist-row.open { border-color: var(--accent); }
+.artist-songs-wrap { list-style: none; }
+.artist-songs { list-style: none; margin: -2px 0 6px 18px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.artist-songs .song-row { grid-template-columns: 22px 1fr auto; }
+.artist-songs .row-actions { flex-direction: row; }
 .rank-pos { font-family: var(--font-title); font-weight: 700; font-size: 1.1rem; text-align: center; }
 .rank-pos.uncertain { color: var(--muted); font-weight: 500; }
 .thumb { width: 48px; height: 48px; border-radius: 10px; background: var(--surface-2) center / cover no-repeat; }

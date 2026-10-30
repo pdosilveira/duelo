@@ -1,7 +1,8 @@
 // Interface. Toda a lógica de ranking vive em engine.js / matchmaker.js.
 
 import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd, CONFIG } from './engine.js';
-import { pickDuel, pickParticipants, pairByInformation } from './matchmaker.js';
+import { pickDuel, pickParticipants, pairByInformation, pickOpponentFor } from './matchmaker.js';
+import { rankArtists } from './artists.js';
 import { TUNE_DUELS, NOTES, latestNotes, noteTarget, pickTuneOpponent, pickSongToRate } from './tune.js';
 import { SWISS_SIZE, SWISS_ROUNDS, createSwiss, currentSwissMatch, recordSwiss, swissDone, table as swissTable, swissAlive, replaceInSwiss, swissPlayed } from './swiss.js';
 import { CUP_SIZE, createCup, currentMatch, recordWinner, champion, roundName, cupAlive, replaceInCup, cupPlayed } from './cup.js';
@@ -25,6 +26,7 @@ function load() {
         pending: d.pending || null,
         me: typeof d.me === 'string' ? d.me : null,
         cup: d.cup || null,
+        calib: d.calib || null,
         swiss: d.swiss || null,
         tourMode: d.tourMode === 'swiss' ? 'swiss' : 'ko',
         notes: Array.isArray(d.notes) ? d.notes : [],
@@ -95,6 +97,7 @@ function el(tag, attrs = {}, ...children) {
 const ICONS = {
   play: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.6-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
   pause: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>',
+  calib: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
   archive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg>',
   off: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 9v6h4l5 4V5L9 9H5z"/><path d="M17 9l4 6M21 9l-4 6"/></svg>',
 };
@@ -300,6 +303,7 @@ function renderDuel() {
     return;
   }
 
+  if (calibActive()) return renderCalib(body);
   renderModeSwitch();
   if (data.mode === 'note') return renderNoteMode(body);
 
@@ -380,6 +384,15 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (currentTab !== 'duel') return;
+  if (calibActive()) {
+    const tagc = document.activeElement?.tagName;
+    const r = { ArrowLeft: 'A', ArrowRight: 'B', ArrowDown: 'D' }[e.key];
+    if (r && tagc !== 'INPUT') {
+      e.preventDefault();
+      calibVote(r);
+    }
+    return;
+  }
   if (data.mode === 'note' && activeSongs().length >= 2) {
     const tag0 = document.activeElement?.tagName;
     if (tag0 === 'INPUT' || tag0 === 'TEXTAREA') return;
@@ -592,6 +605,105 @@ function tuneVote(r) {
     if (finished) {
       const pos = ranking(state, Date.now()).findIndex((x) => x.song.id === t.song) + 1;
       toast(`Ajuste feito: “${title}” está em ${pos}º no seu ranking.`);
+    }
+    if (currentTab === 'duel') renderDuel();
+    else locked = false;
+  }, 480);
+}
+
+// ---------- calibrar ----------
+
+const CALIB_DUELS = 5;
+
+function startCalib(id) {
+  player.pause();
+  data.calib = { song: id, done: 0, faced: [], pending: null, start: myPosition(id) };
+  save();
+  showTab('duel');
+}
+
+function calibActive() {
+  const c = data.calib;
+  if (!c) return false;
+  const s = songById(c.song);
+  if (!s || s.archived || c.done >= CALIB_DUELS) {
+    data.calib = null;
+    save();
+    return false;
+  }
+  return true;
+}
+
+const myPosition = (id) => ranking(state, Date.now()).findIndex((x) => x.song.id === id) + 1;
+
+function renderCalib(body) {
+  const c = data.calib;
+  const p = c.pending;
+  const ok = p && !voteIds.has(p.id) && songById(p.a) && songById(p.b) && !songById(p.a).archived && !songById(p.b).archived;
+  if (!ok) {
+    const opp = pickOpponentFor(state, c.song, Date.now(), Math.random, new Set(c.faced));
+    if (!opp) {
+      data.calib = null;
+      save();
+      return renderDuel();
+    }
+    c.pending = Math.random() < 0.5 ? { id: newId(), a: c.song, b: opp } : { id: newId(), a: opp, b: c.song };
+    save();
+  }
+  const song = songById(c.song);
+  body.append(
+    el('div', { class: 'tune-bar' }, el('span', { text: `Calibrando · duelo ${c.done + 1} de ${CALIB_DUELS}` }), el('span', { class: 'tune-note', text: `Agora em ${myPosition(c.song)}º` })),
+    duelCard(songById(c.pending.a), 'A', { onVote: calibVote }),
+    el('div', { class: 'tie-row' }, el('button', { class: 'tie', type: 'button', text: 'Empate', onclick: () => calibVote('D') })),
+    duelCard(songById(c.pending.b), 'B', { onVote: calibVote }),
+    el('div', { class: 'tune-skip' }, el('button', {
+      class: 'linkish',
+      type: 'button',
+      text: `Encerrar calibração de “${song.title}”`,
+      onclick: () => {
+        data.calib = null;
+        save();
+        flashSong = song.id;
+        showTab('rank');
+      },
+    }))
+  );
+  body.classList.add('entering');
+}
+
+function calibVote(r) {
+  if (locked || !calibActive()) return;
+  const c = data.calib;
+  const p = c.pending;
+  if (!p) return;
+  locked = true;
+  player.pause();
+  const before = c.start || myPosition(c.song);
+  recordVote(p.id, p.a, p.b, r);
+  c.faced.push(p.a === c.song ? p.b : p.a);
+  c.done++;
+  c.pending = null;
+  const finished = c.done >= CALIB_DUELS;
+  const id = c.song;
+  const title = songById(id)?.title;
+  if (finished) data.calib = null;
+  save();
+  scheduleSync();
+
+  const body = $('#duel-body');
+  body.classList.remove('entering');
+  body.querySelectorAll('.card').forEach((x) => {
+    if (r === 'D') x.classList.add('tied');
+    else x.classList.add(x.dataset.side === r ? 'chosen' : 'dimmed');
+  });
+  if (r === 'D') body.querySelector('.tie')?.classList.add('chosen');
+  setTimeout(() => body.classList.add('leaving'), 300);
+  setTimeout(() => {
+    if (finished) {
+      const pos = myPosition(id);
+      toast(`Calibrada: “${title}” está em ${pos}º no seu ranking${pos !== before ? ` (antes ${before}º)` : ''}.`);
+      flashSong = id;
+      if (currentTab === 'duel') return showTab('rank');
     }
     if (currentTab === 'duel') renderDuel();
     else locked = false;
@@ -910,6 +1022,19 @@ function renderSwiss(body) {
 // ---------- ranking ----------
 
 let rankMode = syncEnabled ? 'all' : 'me';
+let rankView = 'songs'; // songs | artists
+let openArtist = null;
+let flashSong = null; // música recém-calibrada: destaca no ranking
+
+function calibButton(song) {
+  const btn = el('button', { class: 'play small calib', type: 'button', 'aria-label': `Calibrar ${song.title}`, title: 'Calibrar (5 duelos)' });
+  btn.innerHTML = ICONS.calib;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startCalib(song.id);
+  });
+  return btn;
+}
 
 function renderRanking() {
   const body = $('#rank-body');
@@ -936,11 +1061,28 @@ function renderRanking() {
       );
     }
     body.append(seg);
-    if (rankMode === 'all') {
+    if (rankMode === 'all' && rankView === 'songs') {
       const voters = new Set(data.votes.map((v) => (v.voter || data.me || '').toLowerCase()).filter(Boolean));
       body.append(el('p', { class: 'legend', text: `${voters.size} ${voters.size === 1 ? 'pessoa' : 'pessoas'} · ${st.history.count} votos` }));
     }
   }
+
+  const vseg = el('div', { class: 'seg', role: 'tablist', 'aria-label': 'Ver' });
+  for (const [v, label] of [['songs', 'Músicas'], ['artists', 'Artistas']]) {
+    vseg.append(
+      el('button', {
+        type: 'button',
+        role: 'tab',
+        'aria-selected': String(rankView === v),
+        text: label,
+        onclick: () => {
+          rankView = v;
+          renderRanking();
+        },
+      })
+    );
+  }
+  body.prepend(vseg);
 
   if (st.history.count === 0) {
     const enough = rows.length >= 2;
@@ -961,6 +1103,8 @@ function renderRanking() {
     return;
   }
 
+  if (rankView === 'artists') return renderArtists(body, st, now);
+
   let lo = Infinity;
   let hi = -Infinity;
   for (const r of rows) {
@@ -980,7 +1124,7 @@ function renderRanking() {
     list.append(
       el(
         'li',
-        { class: 'rank-row has-play' },
+        { class: 'rank-row has-play' + (flashSong === r.song.id ? ' flash' : ''), 'data-song': r.song.id },
         el('div', { class: 'rank-pos' + (uncertain ? ' uncertain' : ''), text: (uncertain ? '~' : '') + (i + 1), title: uncertain ? 'Posição incerta' : null }),
         cover(r.song.art, 'thumb'),
         el(
@@ -1001,9 +1145,80 @@ function renderRanking() {
             el('span', { text: `${notesNow.has(r.song.id) ? `Nota ${notesNow.get(r.song.id).n} · ` : ''}${s.games} ${s.games === 1 ? 'duelo' : 'duelos'} (${s.w}V ${s.d}E ${s.l}D)` })
           )
         ),
-        playButton(r.song, true)
+        el('div', { class: 'row-actions' }, playButton(r.song, true), calibButton(r.song))
       )
     );
+  });
+  body.append(list);
+  if (flashSong) {
+    const row = list.querySelector(`[data-song="${CSS.escape(flashSong)}"]`);
+    if (row) setTimeout(() => row.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+    flashSong = null;
+  }
+}
+
+function renderArtists(body, st, now) {
+  const rows = rankArtists(st, activeSongs(), now);
+  $('#rank-count').textContent = `${rows.length} artistas`;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const r of rows) {
+    lo = Math.min(lo, r.low);
+    hi = Math.max(hi, r.high);
+  }
+  const span = Math.max(1, hi - lo);
+  const pct = (x) => ((x - lo) / span) * 100;
+  body.append(el('p', { class: 'legend', text: 'Pela média das 5 melhores músicas de cada artista; quem tem poucas músicas ou músicas pouco testadas é puxado para o meio. Parcerias contam para cada artista. Toque para ver as músicas.' }));
+  const list = el('ol', { class: 'rank-list' });
+  rows.forEach((r, i) => {
+    const open = openArtist === r.name;
+    const uncertain = r.u >= 80;
+    const li = el(
+      'li',
+      { class: 'rank-row artist-row' + (open ? ' open' : ''), role: 'button', tabindex: '0', 'aria-expanded': String(open) },
+      el('div', { class: 'rank-pos' + (uncertain ? ' uncertain' : ''), text: (uncertain ? '~' : '') + (i + 1) }),
+      cover(r.best.art, 'thumb'),
+      el(
+        'div',
+        { class: 'rank-main' },
+        el('div', { class: 'line1', text: r.name }),
+        el('div', { class: 'line2', text: `${r.songs.length} ${r.songs.length === 1 ? 'música' : 'músicas'} · melhor: ${r.best.title}` }),
+        el(
+          'div',
+          { class: 'interval', role: 'img', 'aria-label': `Faixa de ${Math.round(r.low)} a ${Math.round(r.high)}` },
+          el('div', { class: 'range', style: `left:${pct(r.low)}%;width:${Math.max(1, pct(r.high) - pct(r.low))}%` }),
+          el('div', { class: 'mark', style: `left:${pct(r.rating)}%` })
+        ),
+        el('div', { class: 'rank-foot' }, el('span', { class: 'conf' + (r.u < 50 ? ' firm' : ''), text: r.confidence }), el('span', { text: `${r.games} duelos` }))
+      )
+    );
+    const toggle = () => {
+      openArtist = open ? null : r.name;
+      renderRanking();
+    };
+    li.addEventListener('click', toggle);
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+    list.append(li);
+    if (open) {
+      const sub = el('ol', { class: 'artist-songs' });
+      r.songs.forEach((x, j) =>
+        sub.append(
+          el(
+            'li',
+            { class: 'song-row' },
+            el('span', { class: 'st-pos', text: String(j + 1) }),
+            el('div', { class: 'rank-main' }, el('div', { class: 'line1', text: x.song.title }), el('div', { class: 'line2', text: `${x.games} ${x.games === 1 ? 'duelo' : 'duelos'}${x.song.artist !== r.name ? ' · ' + x.song.artist : ''}` })),
+            el('div', { class: 'row-actions' }, playButton(x.song, true), calibButton(x.song))
+          )
+        )
+      );
+      list.append(el('li', { class: 'artist-songs-wrap' }, sub));
+    }
   });
   body.append(list);
 }
@@ -1039,6 +1254,8 @@ function archiveSong(id) {
   if (data.tune?.song === id) data.tune = null;
   else if (data.tune?.pending && (data.tune.pending.a === id || data.tune.pending.b === id)) data.tune.pending = null;
   if (data.rateSong === id) data.rateSong = null;
+  if (data.calib?.song === id) data.calib = null;
+  else if (data.calib?.pending && (data.calib.pending.a === id || data.calib.pending.b === id)) data.calib.pending = null;
   if (player.state.id === id) player.pause();
 
   // Torneios em andamento: uma substituta (mesma metodologia dos duelos) assume a vaga.
