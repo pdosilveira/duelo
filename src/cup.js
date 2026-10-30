@@ -25,10 +25,14 @@ function makeRound(ids, newId, rng) {
 }
 
 // ids: músicas elegíveis. Retorna null se não houver 16.
-export function createCup(ids, newId, rng = Math.random, now = Date.now()) {
+// opts.select(ids, k) escolhe os participantes e opts.pair(ids) monta as oitavas
+// (no app: a mesma metodologia dos duelos). Depois, a chave é fixa.
+export function createCup(ids, newId, rng = Math.random, now = Date.now(), opts = {}) {
   if (ids.length < CUP_SIZE) return null;
-  const picked = shuffle(ids, rng).slice(0, CUP_SIZE);
-  return { id: newId(), createdAt: now, rounds: [makeRound(picked, newId, rng)] };
+  const picked = opts.select ? opts.select(ids, CUP_SIZE) : shuffle(ids, rng).slice(0, CUP_SIZE);
+  const pairs = opts.pair ? opts.pair(picked) : null;
+  const seeded = pairs ? pairs.flat() : picked;
+  return { id: newId(), createdAt: now, rounds: [makeRound(seeded, newId, rng)] };
 }
 
 export function currentMatch(cup) {

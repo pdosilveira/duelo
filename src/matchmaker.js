@@ -132,3 +132,77 @@ export function pickRandom(state, rng = Math.random) {
   if (j >= i) j++;
   return { a: ids[i], b: ids[j] };
 }
+
+// ---------- torneios: mesma metodologia dos duelos individuais ----------
+
+function tourContext(state, ids, now) {
+  const h = state.history;
+  const appear = new Map();
+  for (const [a, b] of h.recent) {
+    appear.set(a, (appear.get(a) || 0) + 1);
+    appear.set(b, (appear.get(b) || 0) + 1);
+  }
+  let active = 0;
+  for (const s of state.songs.values()) if (!s.archived) active++;
+  const info = new Map();
+  for (const id of ids) {
+    const st = getStat(state, id);
+    const rd = currentRd(st, now);
+    info.set(id, { rating: st.rating, rd, phi: toPhi(rd) });
+  }
+  const rot = (id) => 1 / (1 + MM.rotK * (appear.get(id) || 0));
+  return {
+    info,
+    rot,
+    anchorWeight: (id) => info.get(id).rd ** 2 * rot(id),
+    blocked: (a, b) => isBlocked(state, a, b, now, Math.max(active, ids.length)),
+    oppWeight: (a, b) => {
+      const A = info.get(a);
+      const B = info.get(b);
+      const enc = h.pairs.get(pairKey(a, b))?.n || 0;
+      return (pairGain(A.rating, A.phi, B.rating, B.phi) * rot(b) * (1 / (1 + enc))) ** MM.power;
+    },
+  };
+}
+
+// k participantes, sorteados sem reposição com o peso da âncora (RD² × rotatividade).
+export function pickParticipants(state, ids, k, now, rng = Math.random) {
+  const ctx = tourContext(state, ids, now);
+  const pool = ids.slice().sort();
+  const out = [];
+  while (out.length < k && pool.length) {
+    const id = weightedPick(pool, ctx.anchorWeight, rng);
+    out.push(id);
+    pool.splice(pool.indexOf(id), 1);
+  }
+  return out;
+}
+
+// Emparelhamento completo de ids (número par): âncora por RD² × rotatividade,
+// adversária por ganho de informação (10% exploração), evitando cooldown.
+// forbid(a, b) é proibição absoluta (ex.: revanche no suíço). null se impossível.
+export function pairByInformation(state, ids, now, rng = Math.random, forbid = () => false) {
+  if (ids.length % 2) return null;
+  const ctx = tourContext(state, ids, now);
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const remaining = ids.slice().sort();
+    const pairs = [];
+    let ok = true;
+    while (remaining.length) {
+      const anchor = weightedPick(remaining, ctx.anchorWeight, rng);
+      const others = remaining.filter((x) => x !== anchor && !forbid(anchor, x));
+      if (!others.length) {
+        ok = false;
+        break;
+      }
+      const fresh = others.filter((x) => !ctx.blocked(anchor, x));
+      const cands = fresh.length ? fresh : others;
+      const opp = rng() < MM.explore ? cands[Math.floor(rng() * cands.length)] : weightedPick(cands, (x) => ctx.oppWeight(anchor, x), rng);
+      pairs.push([anchor, opp]);
+      remaining.splice(remaining.indexOf(anchor), 1);
+      remaining.splice(remaining.indexOf(opp), 1);
+    }
+    if (ok) return pairs;
+  }
+  return null;
+}

@@ -33,8 +33,46 @@ export function table(sw) {
   return [...rows.values()].sort((x, y) => y.pts - x.pts || y.buch - x.buch || y.w - x.w || sw.players.indexOf(x.id) - sw.players.indexOf(y.id));
 }
 
+const pushRound = (sw, pairs, newId, rng) =>
+  sw.rounds.push(pairs.map(([x, y]) => (rng() < 0.5 ? { a: x, b: y, r: null, vid: newId() } : { a: y, b: x, r: null, vid: newId() })));
+
+// Com opts.pair: grupos de mesma pontuação (do topo para baixo), emparelhados pela
+// metodologia dos duelos; quem sobra desce para o grupo seguinte. Sem revanche.
+function pairByGroups(sw, newId, rng, opts) {
+  const rows = table(sw);
+  const pts = new Map(rows.map((r) => [r.id, r.pts]));
+  const order = rows.map((r) => r.id);
+  const scores = [...new Set(rows.map((r) => r.pts))];
+  const forbid = (x, y) => met(sw, x, y);
+  const pairs = [];
+  let carry = [];
+  for (const sc of scores) {
+    const group = carry.concat(order.filter((id) => pts.get(id) === sc));
+    carry = [];
+    if (group.length % 2) carry = [group.pop()];
+    if (!group.length) continue;
+    const res = opts.pair(group, forbid);
+    if (res) pairs.push(...res);
+    else carry = group.concat(carry);
+  }
+  if (carry.length) {
+    const res = carry.length % 2 ? null : opts.pair(carry, forbid);
+    if (!res) return false;
+    pairs.push(...res);
+  }
+  if (pairs.length * 2 !== sw.players.length) return false;
+  pushRound(sw, pairs, newId, rng);
+  return true;
+}
+
 // Emparelha em ordem de classificação, sem revanche (com retrocesso).
-function pairRound(sw, newId, rng) {
+function pairRound(sw, newId, rng, opts = {}) {
+  if (sw.rounds.length === 0 && opts.pair) {
+    const pairs = opts.pair(sw.players, () => false);
+    if (pairs) return pushRound(sw, pairs, newId, rng), true;
+  } else if (opts.pair && pairByGroups(sw, newId, rng, opts)) {
+    return true;
+  }
   const order = table(sw).map((r) => r.id);
   const pairs = [];
   const used = new Set();
@@ -54,15 +92,17 @@ function pairRound(sw, newId, rng) {
     return false;
   };
   if (!solve()) return false;
-  sw.rounds.push(pairs.map(([x, y]) => (rng() < 0.5 ? { a: x, b: y, r: null, vid: newId() } : { a: y, b: x, r: null, vid: newId() })));
+  pushRound(sw, pairs, newId, rng);
   return true;
 }
 
-export function createSwiss(ids, newId, rng = Math.random, now = Date.now()) {
+// opts.select(ids, k) escolhe os participantes; opts.pair(ids, forbid) emparelha
+// (no app: a mesma metodologia dos duelos). Sem opts: sorteio puro.
+export function createSwiss(ids, newId, rng = Math.random, now = Date.now(), opts = {}) {
   if (ids.length < SWISS_SIZE) return null;
-  const players = shuffle(ids, rng).slice(0, SWISS_SIZE);
+  const players = opts.select ? opts.select(ids, SWISS_SIZE) : shuffle(ids, rng).slice(0, SWISS_SIZE);
   const sw = { id: newId(), createdAt: now, players, rounds: [] };
-  pairRound(sw, newId, rng); // 1ª rodada: ordem sorteada
+  pairRound(sw, newId, rng, opts);
   return sw;
 }
 
@@ -76,10 +116,10 @@ export function currentSwissMatch(sw) {
 export const swissDone = (sw) => Boolean(sw) && sw.rounds.length === SWISS_ROUNDS && !currentSwissMatch(sw);
 
 // r: 'A' | 'B' | 'D' para o jogo atual. Fecha a rodada e emparelha a próxima.
-export function recordSwiss(sw, r, newId, rng = Math.random) {
+export function recordSwiss(sw, r, newId, rng = Math.random, opts = {}) {
   const cur = currentSwissMatch(sw);
   if (!cur || !['A', 'B', 'D'].includes(r)) return false;
   cur.match.r = r;
-  if (!currentSwissMatch(sw) && sw.rounds.length < SWISS_ROUNDS) pairRound(sw, newId, rng);
+  if (!currentSwissMatch(sw) && sw.rounds.length < SWISS_ROUNDS) pairRound(sw, newId, rng, opts);
   return true;
 }

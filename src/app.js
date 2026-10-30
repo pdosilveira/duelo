@@ -1,7 +1,7 @@
 // Interface. Toda a lógica de ranking vive em engine.js / matchmaker.js.
 
 import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd, CONFIG } from './engine.js';
-import { pickDuel } from './matchmaker.js';
+import { pickDuel, pickParticipants, pairByInformation } from './matchmaker.js';
 import { TUNE_DUELS, NOTES, latestNotes, noteTarget, pickTuneOpponent, pickSongToRate } from './tune.js';
 import { SWISS_SIZE, SWISS_ROUNDS, createSwiss, currentSwissMatch, recordSwiss, swissDone, table as swissTable } from './swiss.js';
 import { CUP_SIZE, createCup, currentMatch, recordWinner, champion, roundName } from './cup.js';
@@ -602,9 +602,18 @@ function tuneVote(r) {
 
 let cupLocked = false;
 
+// Torneios usam a mesma metodologia dos duelos individuais (sobre os meus votos).
+function tourOpts() {
+  const now = Date.now();
+  return {
+    select: (ids, k) => pickParticipants(state, ids, k, now),
+    pair: (ids, forbid) => pairByInformation(state, ids, now, Math.random, forbid),
+  };
+}
+
 function newCup() {
   const ids = activeSongs().map((x) => x.id);
-  data.cup = createCup(ids, newId);
+  data.cup = createCup(ids, newId, Math.random, Date.now(), tourOpts());
   save();
   renderCup();
 }
@@ -760,7 +769,7 @@ function renderCup() {
 let swissLocked = false;
 
 function newSwiss() {
-  data.swiss = createSwiss(activeSongs().map((x) => x.id), newId);
+  data.swiss = createSwiss(activeSongs().map((x) => x.id), newId, Math.random, Date.now(), tourOpts());
   save();
   renderCup();
 }
@@ -774,7 +783,7 @@ function swissVote(r) {
   swissLocked = true;
   player.pause();
   recordVote(match.vid, match.a, match.b, r);
-  recordSwiss(data.swiss, r, newId);
+  recordSwiss(data.swiss, r, newId, Math.random, tourOpts());
   save();
   scheduleSync();
 
