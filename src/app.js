@@ -3,6 +3,7 @@
 import { replay, applyVote, compareVotes, ranking, mergeData, getStat, currentRd, CONFIG } from './engine.js';
 import { pickDuel } from './matchmaker.js';
 import { TUNE_DUELS, NOTES, latestNotes, noteTarget, pickTuneOpponent, pickSongToRate } from './tune.js';
+import { SWISS_SIZE, SWISS_ROUNDS, createSwiss, currentSwissMatch, recordSwiss, swissDone, table as swissTable } from './swiss.js';
 import { CUP_SIZE, createCup, currentMatch, recordWinner, champion, roundName } from './cup.js';
 import { createPlayer } from './player.js';
 import { search, rateLimited, loadSeed } from './catalog.js';
@@ -24,6 +25,8 @@ function load() {
         pending: d.pending || null,
         me: typeof d.me === 'string' ? d.me : null,
         cup: d.cup || null,
+        swiss: d.swiss || null,
+        tourMode: d.tourMode === 'swiss' ? 'swiss' : 'ko',
         notes: Array.isArray(d.notes) ? d.notes : [],
         mode: d.mode === 'note' ? 'note' : 'free',
         tune: d.tune || null,
@@ -361,6 +364,14 @@ document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (currentTab === 'cup') {
     const tag = document.activeElement?.tagName;
+    if (data.tourMode === 'swiss') {
+      const r = { ArrowLeft: 'A', ArrowRight: 'B', ArrowDown: 'D' }[e.key];
+      if (r && tag !== 'INPUT' && currentSwissMatch(data.swiss)) {
+        e.preventDefault();
+        swissVote(r);
+      }
+      return;
+    }
     const side = { ArrowLeft: 'A', ArrowRight: 'B' }[e.key];
     if (side && tag !== 'INPUT' && currentMatch(data.cup)) {
       e.preventDefault();
@@ -653,6 +664,27 @@ function renderCup() {
     return;
   }
 
+  const seg = el('div', { class: 'seg', role: 'tablist', 'aria-label': 'Formato' });
+  for (const [mode, label] of [['ko', 'Mata-mata'], ['swiss', 'Suíço']]) {
+    seg.append(
+      el('button', {
+        type: 'button',
+        role: 'tab',
+        'aria-selected': String(data.tourMode === mode),
+        text: label,
+        onclick: () => {
+          if (data.tourMode === mode) return;
+          player.pause();
+          data.tourMode = mode;
+          save();
+          renderCup();
+        },
+      })
+    );
+  }
+  body.append(seg);
+  if (data.tourMode === 'swiss') return renderSwiss(body);
+
   if (!cup) {
     const n = activeSongs().length;
     const enough = n >= CUP_SIZE;
@@ -718,6 +750,149 @@ function renderCup() {
       text: 'Sortear outro chaveamento',
       onclick: () => {
         if (confirm('Descartar este mata-mata e sortear outro? Os votos já dados continuam valendo no ranking.')) newCup();
+      },
+    }))
+  );
+}
+
+// ---------- suíço ----------
+
+let swissLocked = false;
+
+function newSwiss() {
+  data.swiss = createSwiss(activeSongs().map((x) => x.id), newId);
+  save();
+  renderCup();
+}
+
+function swissVote(r) {
+  if (swissLocked) return;
+  const cur = currentSwissMatch(data.swiss);
+  if (!cur) return;
+  const { match } = cur;
+  if (!songById(match.a) || !songById(match.b)) return;
+  swissLocked = true;
+  player.pause();
+  recordVote(match.vid, match.a, match.b, r);
+  recordSwiss(data.swiss, r, newId);
+  save();
+  scheduleSync();
+
+  const arena = $('#cup-body .arena');
+  arena?.classList.remove('entering');
+  arena?.querySelectorAll('.card').forEach((c) => {
+    if (r === 'D') c.classList.add('tied');
+    else c.classList.add(c.dataset.side === r ? 'chosen' : 'dimmed');
+  });
+  if (r === 'D') arena?.querySelector('.tie')?.classList.add('chosen');
+  setTimeout(() => arena?.classList.add('leaving'), 300);
+  setTimeout(() => {
+    swissLocked = false;
+    if (currentTab === 'cup') renderCup();
+  }, 480);
+}
+
+const fmtPts = (p) => String(p).replace('.', ',');
+
+function swissStandings(sw, highlight) {
+  const rows = swissTable(sw);
+  const list = el('ol', { class: 'standings' });
+  rows.forEach((r, i) => {
+    const s = songById(r.id);
+    list.append(
+      el(
+        'li',
+        { class: 'st-row' + (highlight?.has(r.id) ? ' live' : '') + (i < 3 && swissDone(sw) ? ' podium' : '') },
+        el('span', { class: 'st-pos', text: String(i + 1) }),
+        cover(s?.art, 'bk-thumb'),
+        el('span', { class: 'st-name', text: s ? s.title : '—' }),
+        el('span', { class: 'st-rec', text: `${r.w}V ${r.d}E ${r.l}D` }),
+        el('b', { class: 'st-pts', text: fmtPts(r.pts) })
+      )
+    );
+  });
+  return el('div', { class: 'bracket' }, el('h3', { text: 'Classificação' }), list);
+}
+
+function renderSwiss(body) {
+  const sw = data.swiss;
+  const sub = $('#cup-sub');
+  if (!sw) {
+    const n = activeSongs().length;
+    const enough = n >= SWISS_SIZE;
+    body.append(
+      el(
+        'div',
+        { class: 'empty' },
+        el('h2', { text: 'Suíço' }),
+        el('p', {
+          text: enough
+            ? `${SWISS_SIZE} músicas, ${SWISS_ROUNDS} rodadas, ninguém é eliminado. A cada rodada, quem tem a mesma pontuação se enfrenta. Vitória vale 1, empate ½. Cada jogo também conta para o ranking.`
+            : `Você precisa de pelo menos ${SWISS_SIZE} músicas no catálogo (tem ${n}).`,
+        }),
+        enough
+          ? el('button', { class: 'btn', type: 'button', text: 'Sortear 1ª rodada', onclick: newSwiss })
+          : el('button', { class: 'btn', type: 'button', text: 'Adicionar músicas', onclick: () => showTab('songs') })
+      )
+    );
+    return;
+  }
+
+  if (swissDone(sw)) {
+    sub.textContent = 'Fim do torneio';
+    const top = swissTable(sw).slice(0, 3);
+    const podium = el('div', { class: 'podium-row' });
+    // ordem visual: 2º, 1º, 3º
+    for (const i of [1, 0, 2]) {
+      const r = top[i];
+      const s = songById(r?.id);
+      podium.append(
+        el(
+          'div',
+          { class: `podium-slot p${i + 1}` },
+          el('div', { class: 'podium-medal', text: ['🥇', '🥈', '🥉'][i] }),
+          cover(s?.art, 'podium-cover'),
+          el('div', { class: 'podium-title', text: s?.title || '—' }),
+          el('div', { class: 'podium-artist', text: s?.artist || '' }),
+          el('div', { class: 'podium-pts', text: `${fmtPts(r?.pts ?? 0)} pts` }),
+          s ? playButton(s, true) : null
+        )
+      );
+    }
+    body.append(
+      podium,
+      el('div', { class: 'champ-actions center' }, el('button', { class: 'btn', type: 'button', text: 'Novo suíço', onclick: newSwiss })),
+      swissStandings(sw)
+    );
+    return;
+  }
+
+  const cur = currentSwissMatch(sw);
+  const round = sw.rounds[cur.round];
+  sub.textContent = `Rodada ${cur.round + 1} de ${SWISS_ROUNDS} · jogo ${cur.index + 1} de ${round.length}`;
+  const a = songById(cur.match.a);
+  const b = songById(cur.match.b);
+  const pts = new Map(swissTable(sw).map((r) => [r.id, r.pts]));
+  const arena = el('div', { class: 'arena entering' });
+  if (a && b) {
+    arena.append(
+      duelCard(a, 'A', { onVote: swissVote, archive: false }),
+      el('div', { class: 'tie-row' }, el('button', { class: 'tie', type: 'button', text: 'Empate', onclick: () => swissVote('D') })),
+      duelCard(b, 'B', { onVote: swissVote, archive: false })
+    );
+  } else {
+    arena.append(el('p', { class: 'note', text: 'Uma música deste jogo não está mais disponível.' }));
+  }
+  body.append(
+    el('p', { class: 'legend swiss-info', text: `Confronto de quem tem ${fmtPts(pts.get(cur.match.a))} × ${fmtPts(pts.get(cur.match.b))} pontos` }),
+    arena,
+    swissStandings(sw, new Set([cur.match.a, cur.match.b])),
+    el('div', { class: 'cup-reset' }, el('button', {
+      class: 'btn ghost small',
+      type: 'button',
+      text: 'Sortear outro suíço',
+      onclick: () => {
+        if (confirm('Descartar este torneio e sortear outro? Os votos já dados continuam valendo no ranking.')) newSwiss();
       },
     }))
   );
